@@ -15,7 +15,8 @@ server {
 
 # ── Main HTTPS server (Roundcube + Rspamd UI) ────────────────────────────────
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name ${MAIL_HOSTNAME};
 
     ssl_certificate     /etc/ssl/mail/fullchain.pem;
