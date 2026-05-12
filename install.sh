@@ -243,6 +243,16 @@ mkdir -p "${DATA_DIR}"/{postfix/spool,postfix/log,dovecot,redis,mariadb,roundcub
 # Export all variables for envsubst
 export MAIL_DOMAIN MAIL_HOSTNAME SERVER_IP ROUNDCUBE_DES_KEY
 
+# Docker creates directories when bind-mount targets don't exist yet.
+# Remove any such bogus directories so envsubst can create proper files.
+for f in \
+    "${CONFIG_DIR}/nginx/mail.conf" \
+    "${CONFIG_DIR}/roundcube/config.inc.php" \
+    "${CONFIG_DIR}/rspamd/local.d/dkim_signing.conf" \
+    "${CONFIG_DIR}/rspamd/local.d/worker-controller.inc"; do
+    [[ -d "$f" ]] && rm -rf "$f"
+done
+
 # ── Postfix ──────────────────────────────────────────────────────────────────
 envsubst '${MAIL_DOMAIN} ${MAIL_HOSTNAME}' \
     < "${CONFIG_DIR}/postfix/main.cf.template" \
