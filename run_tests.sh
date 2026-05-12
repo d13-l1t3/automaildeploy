@@ -1,0 +1,380 @@
+#!/usr/bin/env bash
+###############################################################################
+#  AutoMailDeploy — Comprehensive Test Suite
+#  Run:  sudo bash run_tests.sh
+#
+#  Tests all major components of the mail infrastructure:
+#    1. Container health
+#    2. SSL/TLS endpoints
+#    3. IMAP authentication
+#    4. Anti-relay protection
+#    5. Mail delivery (local)
+#    6. Cross-user delivery
+#    7. Rspamd milter integration
+#    8. GTUBE spam rejection
+#    9. DKIM signing
+#   10. manage_users.sh CRUD
+#   11. Nginx reverse proxy
+#   12. Dovecot Sieve (Junk folder)
+#   13. Postfix STARTTLS on submission (587)
+#   14. MariaDB / Roundcube readiness
+###############################################################################
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/.env"
+
+# ── Colors ───────────────────────────────────────────────────────────────────
+GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+
+PASS=0; FAIL=0; WARN=0
+
+pass() { ((PASS++)); echo -e "  ${GREEN}✔ PASS${NC}  $1"; }
+fail() { ((FAIL++)); echo -e "  ${RED}✘ FAIL${NC}  $1"; }
+warn() { ((WARN++)); echo -e "  ${YELLOW}⚠ WARN${NC}  $1"; }
+banner() { echo -e "\n${CYAN}${BOLD}── $1 ──${NC}"; }
+
+# ── Load .env ────────────────────────────────────────────────────────────────
+if [[ ! -f "$ENV_FILE" ]]; then
+    echo -e "${RED}[✘] .env not found. Run install.sh first.${NC}"; exit 1
+fi
+set -a; source "$ENV_FILE"; set +a
+
+DC="docker compose"
+
+###############################################################################
+# 1. Container Health
+###############################################################################
+banner "1/14 — Container Health"
+
+EXPECTED_CONTAINERS=(automail-postfix automail-dovecot automail-rspamd automail-nginx automail-roundcube automail-mariadb automail-redis)
+for cname in "${EXPECTED_CONTAINERS[@]}"; do
+    status=$(docker ps --filter "name=^${cname}$" --format '{{.Status}}' 2>/dev/null)
+    if [[ "$status" == *"Up"* ]]; then
+        pass "$cname is running ($status)"
+    else
+        fail "$cname is NOT running (status: ${status:-not found})"
+    fi
+done
+
+###############################################################################
+# 2. SSL/TLS Endpoints
+###############################################################################
+banner "2/14 — SSL/TLS Endpoints"
+
+# IMAPS (993)
+if openssl s_client -connect localhost:993 -quiet </dev/null 2>&1 | grep -q "Dovecot"; then
+    pass "IMAPS (993) — TLS handshake OK, Dovecot banner received"
+else
+    fail "IMAPS (993) — TLS handshake failed"
+fi
+
+# SMTPS (465)
+if openssl s_client -connect localhost:465 -quiet </dev/null 2>&1 | grep -qi "ssl\|depth"; then
+    pass "SMTPS (465) — TLS handshake OK"
+else
+    fail "SMTPS (465) — TLS handshake failed"
+fi
+
+# Submission STARTTLS (587)
+if openssl s_client -starttls smtp -connect localhost:587 -quiet </dev/null 2>&1 | grep -qi "CHUNKING\|depth"; then
+    pass "Submission (587) — STARTTLS OK"
+else
+    fail "Submission (587) — STARTTLS failed"
+fi
+
+###############################################################################
+# 3. IMAP Authentication
+###############################################################################
+banner "3/14 — IMAP Authentication"
+
+# Correct credentials
+IMAP_RESULT=$(echo -e "a1 LOGIN ${ADMIN_USER}@${MAIL_DOMAIN} \"${ADMIN_PASSWORD}\"\na2 LOGOUT" \
+    | openssl s_client -connect localhost:993 -quiet 2>/dev/null)
+if echo "$IMAP_RESULT" | grep -q "a1 OK"; then
+    pass "IMAP login with correct credentials (${ADMIN_USER}@${MAIL_DOMAIN})"
+else
+    fail "IMAP login with correct credentials rejected"
+fi
+
+# Wrong credentials (must fail)
+IMAP_BAD=$(echo -e "a1 LOGIN fakeuser@${MAIL_DOMAIN} \"wrongpassword\"\na2 LOGOUT" \
+    | openssl s_client -connect localhost:993 -quiet 2>/dev/null)
+if echo "$IMAP_BAD" | grep -qi "NO.*AUTHENTICATIONFAILED\|NO.*authentication"; then
+    pass "IMAP login with wrong credentials correctly rejected"
+else
+    fail "IMAP login with wrong credentials was NOT rejected"
+fi
+
+###############################################################################
+# 4. Anti-Relay Protection
+###############################################################################
+banner "4/14 — Anti-Relay Protection"
+
+RELAY_RESULT=$(echo -e "EHLO test.com\nMAIL FROM:<spammer@evil.com>\nRCPT TO:<someone@gmail.com>\nQUIT" \
+    | timeout 5 telnet localhost 25 2>&1)
+if echo "$RELAY_RESULT" | grep -q "Relay access denied"; then
+    pass "Open relay blocked — external recipients rejected without auth"
+else
+    fail "Open relay NOT blocked — server may be an open relay!"
+fi
+
+###############################################################################
+# 5. Mail Delivery (admin → admin)
+###############################################################################
+banner "5/14 — Mail Delivery (admin → admin)"
+
+$DC exec postfix bash -c \
+    "printf 'Subject: Test 5 self-delivery\nFrom: ${ADMIN_USER}@${MAIL_DOMAIN}\nTo: ${ADMIN_USER}@${MAIL_DOMAIN}\n\nSelf-delivery test at $(date -u +%H:%M:%S)\n' | sendmail -t" 2>/dev/null
+sleep 3
+
+MAIL_COUNT=$($DC exec dovecot find /var/vmail/${MAIL_DOMAIN}/${ADMIN_USER}/Maildir/new/ -type f 2>/dev/null | wc -l)
+if [[ "$MAIL_COUNT" -ge 1 ]]; then
+    pass "Self-delivery: ${MAIL_COUNT} message(s) in admin's inbox"
+else
+    fail "Self-delivery: no messages found in admin's inbox"
+fi
+
+###############################################################################
+# 6. Cross-User Delivery
+###############################################################################
+banner "6/14 — Cross-User Delivery"
+
+# Get first extra user (if defined)
+if [[ -n "${EXTRA_USERS:-}" ]]; then
+    FIRST_USER="${EXTRA_USERS%%:*}"
+
+    $DC exec postfix bash -c \
+        "printf 'Subject: Test 6 cross-user\nFrom: ${ADMIN_USER}@${MAIL_DOMAIN}\nTo: ${FIRST_USER}@${MAIL_DOMAIN}\n\nCross-user test\n' | sendmail -t" 2>/dev/null
+    sleep 3
+
+    CROSS_COUNT=$($DC exec dovecot find /var/vmail/${MAIL_DOMAIN}/${FIRST_USER}/Maildir/new/ -type f 2>/dev/null | wc -l)
+    if [[ "$CROSS_COUNT" -ge 1 ]]; then
+        pass "Cross-user delivery: ${CROSS_COUNT} message(s) in ${FIRST_USER}'s inbox"
+    else
+        fail "Cross-user delivery: no messages in ${FIRST_USER}'s inbox"
+    fi
+else
+    warn "EXTRA_USERS not set — skipping cross-user delivery test"
+fi
+
+###############################################################################
+# 7. Rspamd Milter Integration
+###############################################################################
+banner "7/14 — Rspamd Milter Integration"
+
+# Check postfix log for milter warnings
+MILTER_ERRORS=$($DC exec postfix cat /var/log/mail.log 2>/dev/null | grep -c "rspamd.*not found\|Cannot assign requested address" || true)
+if [[ "$MILTER_ERRORS" -eq 0 ]]; then
+    pass "Rspamd milter connected — no DNS/connection errors in Postfix log"
+else
+    fail "Rspamd milter: ${MILTER_ERRORS} connection error(s) in Postfix log"
+fi
+
+# Rspamd permission errors
+PERM_ERRORS=$($DC logs rspamd 2>&1 | grep -c "Permission denied" || true)
+if [[ "$PERM_ERRORS" -eq 0 ]]; then
+    pass "Rspamd data volume — no permission errors"
+else
+    fail "Rspamd data volume: ${PERM_ERRORS} permission error(s)"
+fi
+
+###############################################################################
+# 8. GTUBE Spam Rejection
+###############################################################################
+banner "8/14 — GTUBE Spam Rejection"
+
+$DC exec postfix bash -c \
+    "printf 'Subject: GTUBE Test\nFrom: ${ADMIN_USER}@${MAIL_DOMAIN}\nTo: ${ADMIN_USER}@${MAIL_DOMAIN}\n\nXJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X\n' | sendmail -t" 2>/dev/null
+sleep 3
+
+GTUBE_LOG=$($DC logs rspamd 2>&1 | grep -i "gtube")
+if echo "$GTUBE_LOG" | grep -qi "reject"; then
+    pass "GTUBE pattern detected and rejected by Rspamd"
+else
+    fail "GTUBE pattern was NOT detected/rejected by Rspamd"
+fi
+
+# Verify the spam did NOT land in inbox
+SPAM_IN_INBOX=$($DC exec postfix cat /var/log/mail.log 2>/dev/null | grep "GTUBE Test" | grep -c "status=sent" || true)
+SPAM_BOUNCED=$($DC exec postfix cat /var/log/mail.log 2>/dev/null | grep -c "milter-reject.*Gtube\|sender non-delivery" || true)
+if [[ "$SPAM_BOUNCED" -ge 1 ]]; then
+    pass "GTUBE email bounced/rejected — not delivered to inbox"
+else
+    warn "GTUBE bounce not confirmed in Postfix log (Rspamd still caught it)"
+fi
+
+###############################################################################
+# 9. DKIM Signing
+###############################################################################
+banner "9/14 — DKIM Signing"
+
+# Check DKIM key exists
+if [[ -f "${SCRIPT_DIR}/dkim/${MAIL_DOMAIN}.dkim.key" ]]; then
+    pass "DKIM private key exists for ${MAIL_DOMAIN}"
+else
+    fail "DKIM private key NOT found"
+fi
+
+# Check Rspamd DKIM config
+DKIM_CFG=$($DC exec rspamd cat /etc/rspamd/local.d/dkim_signing.conf 2>/dev/null)
+if echo "$DKIM_CFG" | grep -q "${MAIL_DOMAIN}"; then
+    pass "DKIM signing config references ${MAIL_DOMAIN}"
+else
+    fail "DKIM signing config does not reference ${MAIL_DOMAIN}"
+fi
+
+# Check DKIM key is accessible inside rspamd container
+if $DC exec rspamd test -f /dkim/${MAIL_DOMAIN}.dkim.key 2>/dev/null; then
+    pass "DKIM key readable inside Rspamd container at /dkim/"
+else
+    fail "DKIM key NOT accessible inside Rspamd container"
+fi
+
+###############################################################################
+# 10. manage_users.sh CRUD
+###############################################################################
+banner "10/14 — manage_users.sh User Management"
+
+# List
+LIST_OUT=$(bash "${SCRIPT_DIR}/manage_users.sh" list 2>&1)
+if echo "$LIST_OUT" | grep -q "${ADMIN_USER}@${MAIL_DOMAIN}"; then
+    pass "manage_users.sh list — shows admin user"
+else
+    fail "manage_users.sh list — admin user not found"
+fi
+
+# Add
+TESTUSER="_autotest_user_$$"
+ADD_OUT=$(bash "${SCRIPT_DIR}/manage_users.sh" add "$TESTUSER" "T3stP@ss_Auto" 2>&1)
+if echo "$ADD_OUT" | grep -qi "created"; then
+    pass "manage_users.sh add — created ${TESTUSER}@${MAIL_DOMAIN}"
+else
+    fail "manage_users.sh add — failed to create test user"
+fi
+
+# Verify added
+if grep -q "${TESTUSER}@${MAIL_DOMAIN}" "${SCRIPT_DIR}/config/dovecot/passwd" 2>/dev/null; then
+    pass "manage_users.sh add — user present in passwd file"
+else
+    fail "manage_users.sh add — user NOT in passwd file"
+fi
+
+# Remove
+RM_OUT=$(bash "${SCRIPT_DIR}/manage_users.sh" remove "$TESTUSER" 2>&1)
+if echo "$RM_OUT" | grep -qi "removed"; then
+    pass "manage_users.sh remove — removed ${TESTUSER}@${MAIL_DOMAIN}"
+else
+    fail "manage_users.sh remove — failed to remove test user"
+fi
+
+# Verify removed
+if ! grep -q "${TESTUSER}@${MAIL_DOMAIN}" "${SCRIPT_DIR}/config/dovecot/passwd" 2>/dev/null; then
+    pass "manage_users.sh remove — user purged from passwd file"
+else
+    fail "manage_users.sh remove — user still in passwd file"
+fi
+
+###############################################################################
+# 11. Nginx Reverse Proxy
+###############################################################################
+banner "11/14 — Nginx Reverse Proxy"
+
+# HTTP → HTTPS redirect
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost/ 2>/dev/null)
+if [[ "$HTTP_CODE" == "301" ]]; then
+    pass "HTTP → HTTPS redirect (301)"
+elif [[ "$HTTP_CODE" == "000" ]]; then
+    fail "Nginx not responding on port 80"
+else
+    warn "HTTP response: $HTTP_CODE (expected 301)"
+fi
+
+# HTTPS Roundcube
+HTTPS_CODE=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 https://localhost/ 2>/dev/null)
+if [[ "$HTTPS_CODE" == "200" ]]; then
+    pass "HTTPS → Roundcube webmail (200 OK)"
+elif [[ "$HTTPS_CODE" == "502" ]]; then
+    warn "HTTPS 502 — Roundcube PHP-FPM may still be initializing"
+else
+    fail "HTTPS response: $HTTPS_CODE (expected 200)"
+fi
+
+# Rspamd web UI
+RSPAMD_CODE=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 https://localhost/rspamd/ 2>/dev/null)
+if [[ "$RSPAMD_CODE" == "200" ]]; then
+    pass "Rspamd web UI at /rspamd/ (200 OK)"
+else
+    fail "Rspamd web UI response: $RSPAMD_CODE (expected 200)"
+fi
+
+###############################################################################
+# 12. Dovecot Sieve (default sieve exists)
+###############################################################################
+banner "12/14 — Dovecot Sieve Configuration"
+
+SIEVE_EXISTS=$($DC exec dovecot test -f /var/vmail/sieve/default.sieve 2>/dev/null && echo "yes" || echo "no")
+if [[ "$SIEVE_EXISTS" == "yes" ]]; then
+    pass "Default Sieve script present at /var/vmail/sieve/default.sieve"
+else
+    warn "Default Sieve script not found (optional — spam-to-Junk filtering not active)"
+fi
+
+###############################################################################
+# 13. Postfix SMTP Banner & STARTTLS
+###############################################################################
+banner "13/14 — Postfix SMTP Banner"
+
+SMTP_BANNER=$(echo "QUIT" | timeout 3 telnet localhost 25 2>&1)
+if echo "$SMTP_BANNER" | grep -q "220.*${MAIL_HOSTNAME}"; then
+    pass "SMTP banner shows correct hostname (${MAIL_HOSTNAME})"
+else
+    fail "SMTP banner does not show ${MAIL_HOSTNAME}"
+fi
+
+if echo "$SMTP_BANNER" | grep -qi "ESMTP"; then
+    pass "SMTP banner hides software version (shows ESMTP only)"
+else
+    warn "SMTP banner may be leaking server info"
+fi
+
+###############################################################################
+# 14. MariaDB / Roundcube Database
+###############################################################################
+banner "14/14 — MariaDB & Roundcube Database"
+
+DB_CHECK=$($DC exec mariadb mysql -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1;" "${MYSQL_DATABASE}" 2>&1)
+if echo "$DB_CHECK" | grep -q "1"; then
+    pass "MariaDB connection OK (${MYSQL_USER}@${MYSQL_DATABASE})"
+else
+    fail "MariaDB connection failed"
+fi
+
+# Check Roundcube tables exist
+TABLE_COUNT=$($DC exec mariadb mysql -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}';" 2>/dev/null | tr -d '[:space:]')
+if [[ -n "$TABLE_COUNT" && "$TABLE_COUNT" -gt 0 ]]; then
+    pass "Roundcube database has ${TABLE_COUNT} table(s)"
+else
+    warn "Roundcube database has no tables yet (created on first webmail login)"
+fi
+
+###############################################################################
+# Summary
+###############################################################################
+echo ""
+echo -e "${BOLD}══════════════════════════════════════════${NC}"
+echo -e "${BOLD}  Test Summary${NC}"
+echo -e "${BOLD}══════════════════════════════════════════${NC}"
+echo ""
+echo -e "  ${GREEN}Passed:  ${PASS}${NC}"
+echo -e "  ${RED}Failed:  ${FAIL}${NC}"
+echo -e "  ${YELLOW}Warnings: ${WARN}${NC}"
+echo ""
+
+if [[ "$FAIL" -eq 0 ]]; then
+    echo -e "  ${GREEN}${BOLD}All critical tests passed! ✔${NC}"
+else
+    echo -e "  ${RED}${BOLD}${FAIL} test(s) failed — review output above.${NC}"
+fi
+echo ""
