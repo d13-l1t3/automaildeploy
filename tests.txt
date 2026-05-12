@@ -1,140 +1,62 @@
-goga@goga:~/automaildeploy$ sudo docker compose down -v
-WARN[0000] /home/goga/automaildeploy/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion
-[+] down 9/9
- ✔ Container automail-nginx         Removed                                                                       0.0s
- ✔ Container automail-roundcube     Removed                                                                       0.5s
- ✔ Container automail-mariadb       Removed                                                                       0.7s
- ✔ Container automail-postfix       Removed                                                                       0.6s
- ✔ Container automail-dovecot       Removed                                                                       1.7s
- ✔ Container automail-rspamd        Removed                                                                       0.5s
- ✔ Container automail-redis         Removed                                                                       0.4s
- ✔ Volume automaildeploy_mail-vmail Removed                                                                       0.0s
- ✔ Network automaildeploy_mailnet   Removed                                                                       0.2s
-goga@goga:~/automaildeploy$ sudo rm -rf config/ssl config/postfix/main.cf config/dovecot/dovecot.conf config/dovecot/passwd config/nginx/mail.conf config/rspamd/local.d/dkim_signing.conf config/rspamd/local.d/worker-controller.inc config/roundcube/config.inc.php data/
-goga@goga:~/automaildeploy$ sudo bash install.sh
-
-══════════════════════════════════════════
-  AutoMailDeploy — Enterprise Mail Server Installer
-══════════════════════════════════════════
-
-[✔] Loading configuration from .env …
-[✔] Configuration validated.
-
-══════════════════════════════════════════
-  1/6 — Installing Host Dependencies
-══════════════════════════════════════════
-
-[✔] Docker already installed — Docker version 29.4.3, build 055a478
-[✔] Certbot already installed — certbot 2.9.0
-
-══════════════════════════════════════════
-  2/6 — Obtaining SSL/TLS Certificates
-══════════════════════════════════════════
-
-[⚠] Non-public domain detected (mail.test.local). Will generate self-signed certificate.
-[✔] Generating self-signed certificate (valid 365 days) …
-[✔] Self-signed certificate created.
-[⚠] Browsers and external mail servers will NOT trust this certificate.
-[⚠] For production, use a real domain and set USE_SELFSIGNED to false.
-[✔] SSL/TLS certificates ready.
-
-══════════════════════════════════════════
-  3/6 — Generating DKIM Keys
-══════════════════════════════════════════
-
-[✔] DKIM key already exists for test.local, skipping.
-
-══════════════════════════════════════════
-  4/6 — Generating Service Configurations
-══════════════════════════════════════════
-
-[✔] Postfix configs generated.
-[✔] Dovecot configs generated.
-[✔] Rspamd configs generated.
-[✔] Nginx configs generated.
-[✔] Roundcube configs generated.
-
-══════════════════════════════════════════
-  5/6 — Starting Docker Infrastructure
-══════════════════════════════════════════
-
-WARN[0000] /home/goga/automaildeploy/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion
-[+] build 2/2
- ✔ Image automaildeploy-dovecot Built                                       2.3s
- ✔ Image automaildeploy-postfix Built                                       2.3s
-WARN[0000] /home/goga/automaildeploy/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion
-[+] up 9/9
- ✔ Network automaildeploy_mailnet   Created                                                                       0.0s
- ✔ Volume automaildeploy_mail-vmail Created                                                                       0.0s
- ✔ Container automail-dovecot       Started                                                                       0.9s
- ✔ Container automail-redis         Started                                                                       0.8s
- ✔ Container automail-mariadb       Started                                                                       0.7s
- ✔ Container automail-rspamd        Started                                                                       0.8s
- ✔ Container automail-postfix       Started                                                                       1.1s
- ✔ Container automail-roundcube     Started                                                                       1.3s
- ✔ Container automail-nginx         Started                                                                       1.6s
-[✔] All containers started.
-[✔] Waiting for services to become healthy …
-  ● automail-postfix — running
-  ● automail-dovecot — running
-  ● automail-rspamd — running
-  ● automail-nginx — running
-  ● automail-roundcube — running
-  ● automail-mariadb — running
-  ● automail-redis — running
-
-══════════════════════════════════════════
-  6/6 — Required DNS Records
-══════════════════════════════════════════
-
-Add the following DNS records at your DNS provider:
-
-┌─────────┬──────────────────────────────────────────────────────────────────┐
-│ Type    │ Value                                                            │
-├─────────┼──────────────────────────────────────────────────────────────────┤
-│ A       │ mail.test.local.  →  192.168.1.100                             │
-│ MX      │ test.local.  →  10 mail.test.local.                            │
-│ TXT     │ test.local.  →  "v=spf1 mx a ip4:192.168.1.100 -all"           │
-│ TXT     │ _dmarc.test.local.  →  "v=DMARC1; p=quarantine; rua=mailto:postmaster@test.local" │
-│ TXT     │ dkim._domainkey.test.local.                                      │
-└─────────┴──────────────────────────────────────────────────────────────────┘
-
-DKIM TXT Record Value (paste as a single TXT record):
-"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA16GM9dbQLNB5tvjsVYdG8Vxg5xwlygNHAC47+9Irj46pn+znQUVVFRQm+i2O8dxL5P6YKsH1u6BsNX9i/4/1v/BnrbnvtbWMMIXufHOhFhsSNZL+47RMv4hTMYn9P7NDKXjmG8YAO2dz0zqB4rguKGHApH4J7Eb5eF5BViCt8IaalpkYSQjPqUDHJxNxp8fT1YMS1QOOX5TM3LEd6vhUitgFC7N2GcNo/6kDv2d6Zw20GC3qDgj4OWwJIzEJFsOvsAgpwleQNOWdOccYTj7YtckAbJKJjfvtB2hI0ZIfi/28IYDcJmWHDLO8PbDaq8O4Pd7HvVpRjf0ZUEtLqAJzDQIDAQAB"
-
-PTR (Reverse DNS):
-Ask your hosting provider to set the PTR record for 192.168.1.100 → mail.test.local
-
-[✔] DNS records also saved to /home/goga/automaildeploy/DNS_RECORDS.txt
-
-══════════════════════════════════════════
-  Installation Complete!
-══════════════════════════════════════════
-
-Webmail:   https://mail.test.local
-Rspamd:   https://mail.test.local/rspamd/
-IMAP:     mail.test.local:993 (SSL)
-SMTP:     mail.test.local:587 (STARTTLS)
-Admin:    admin@test.local
-
-Use ./manage_users.sh to add/remove mailboxes.
-
-goga@goga:~/automaildeploy$ openssl s_client -connect localhost:993 -quiet
-Can't use SSL_get_servername
-depth=0 CN = mail.test.local, O = AutoMailDeploy, C = US
-verify error:num=18:self-signed certificate
-verify return:1
-depth=0 CN = mail.test.local, O = AutoMailDeploy, C = US
-verify return:1
-* OK [CAPABILITY IMAP4rev1 SASL-IR LOGIN-REFERRALS ID ENABLE IDLE LITERAL+ AUTH=PLAIN AUTH=LOGIN] Dovecot (Debian) ready.
-a1 LOGIN admin@test.local "TestAdmin123!"
-a1 NO [UNAVAILABLE] Temporary authentication failure. [mail.test.local:2026-05-12 20:23:17]
-a2 LIST "" "*"
-a2 BAD Error in IMAP command received by server.
-^C
 goga@goga:~/automaildeploy$ sudo docker compose exec postfix bash -c \
-  'echo "Subject: Test
+  'echo "Subject: Test Email
 From: admin@test.local
 To: john@test.local
-Hello" | sendmail -t'
-WARN[0000] /home/goga/automaildeploy/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion
+This is a test message." | sendmail -t'
+goga@goga:~/automaildeploy$ sudo docker compose exec dovecot ls /var/vmail/test.local/john/Maildir/new/
+ls: cannot access '/var/vmail/test.local/john/Maildir/new/': No such file or directory
+goga@goga:~/automaildeploy$ sudo bash manage_users.sh list
+Mailboxes for test.local:
+  ● admin@test.local
+  ● john@test.local
+  ● jane@test.local
+goga@goga:~/automaildeploy$ sudo bash manage_users.sh add testuser 'MyP4ssword'
+[✔] Mailbox testuser@test.local created.
+[✔] Reloading Postfix and Dovecot …
+postfix: Postfix is using backwards-compatible default settings
+postfix: See http://www.postfix.org/COMPATIBILITY_README.html for details
+postfix: To disable backwards compatibility use "postconf compatibility_level=3.6" and "postfix reload"
+postfix/postfix-script: refreshing the Postfix mail system
+[✔] Services reloaded.
+goga@goga:~/automaildeploy$ sudo bash manage_users.sh list
+Mailboxes for test.local:
+  ● admin@test.local
+  ● john@test.local
+  ● jane@test.local
+  ● testuser@test.local
+goga@goga:~/automaildeploy$ sudo docker compose exec postfix bash -c \
+  'echo "Subject: Spam Test
+From: admin@test.local
+To: admin@test.local
+XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X" | sendmail -t'
+goga@goga:~/automaildeploy$ sudo docker compose logs rspamd | tail -30
+automail-rspamd  | 2026-05-12 20:31:43 #9(controller) <gbuj7k>; cfg; rspamd_worker_monitored_on_change: broadcast monitored update for c9hxbz89514tetn9pyneggsoqmudkgo: dead
+automail-rspamd  | 2026-05-12 20:31:43 #11(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for c9hxbz89514tetn9pyneggsoqmudkgo: dead
+automail-rspamd  | 2026-05-12 20:31:43 #10(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for c9hxbz89514tetn9pyneggsoqmudkgo: dead
+automail-rspamd  | 2026-05-12 20:31:43 #13(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for c9hxbz89514tetn9pyneggsoqmudkgo: dead
+automail-rspamd  | 2026-05-12 20:31:43 #12(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for c9hxbz89514tetn9pyneggsoqmudkgo: dead
+automail-rspamd  | 2026-05-12 20:31:53 #9(controller) <imhkkk>; monitored; rspamd_monitored_dns_cb: DNS query blocked on multi.uribl.com (127.0.0.1 returned), possibly due to high volume
+automail-rspamd  | 2026-05-12 20:31:53 #9(controller) <imhkkk>; monitored; rspamd_monitored_propagate_error: invalid return on resolving multi.uribl.com, disable object
+automail-rspamd  | 2026-05-12 20:31:53 #9(controller) <gbuj7k>; cfg; rspamd_worker_monitored_on_change: broadcast monitored update for imhkkkzu76dtxr3ajyrpn947zwx9kfa: dead
+automail-rspamd  | 2026-05-12 20:31:53 #11(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for imhkkkzu76dtxr3ajyrpn947zwx9kfa: dead
+automail-rspamd  | 2026-05-12 20:31:53 #10(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for imhkkkzu76dtxr3ajyrpn947zwx9kfa: dead
+automail-rspamd  | 2026-05-12 20:31:53 #12(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for imhkkkzu76dtxr3ajyrpn947zwx9kfa: dead
+automail-rspamd  | 2026-05-12 20:31:53 #13(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for imhkkkzu76dtxr3ajyrpn947zwx9kfa: dead
+automail-rspamd  | 2026-05-12 20:32:11 #9(controller) <1ccygw>; monitored; rspamd_monitored_dns_cb: DNS reply returned 'no error' for dwl.dnswl.org while 'no records with this name' was expected when querying for 'v5naRFxl.dwl.dnswl.org'(likely DNS spoofing or BL internal issues)
+automail-rspamd  | 2026-05-12 20:32:11 #9(controller) <1ccygw>; monitored; rspamd_monitored_propagate_error: invalid return on resolving dwl.dnswl.org, disable object
+automail-rspamd  | 2026-05-12 20:32:11 #9(controller) <gbuj7k>; cfg; rspamd_worker_monitored_on_change: broadcast monitored update for 1ccygwo8byjjy64p53ed6j3sxizfgnr: dead
+automail-rspamd  | 2026-05-12 20:32:11 #13(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for 1ccygwo8byjjy64p53ed6j3sxizfgnr: dead
+automail-rspamd  | 2026-05-12 20:32:11 #10(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for 1ccygwo8byjjy64p53ed6j3sxizfgnr: dead
+automail-rspamd  | 2026-05-12 20:32:11 #11(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for 1ccygwo8byjjy64p53ed6j3sxizfgnr: dead
+automail-rspamd  | 2026-05-12 20:32:11 #12(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for 1ccygwo8byjjy64p53ed6j3sxizfgnr: dead
+automail-rspamd  | 2026-05-12 20:32:23 #9(controller) <prfoy8>; monitored; rspamd_monitored_dns_cb: DNS reply returned 'no error' for list.dnswl.org while 'no records with this name' was expected when querying for '1.0.0.127.list.dnswl.org'(likely DNS spoofing or BL internal issues)
+automail-rspamd  | 2026-05-12 20:32:23 #9(controller) <prfoy8>; monitored; rspamd_monitored_propagate_error: invalid return on resolving list.dnswl.org, disable object
+automail-rspamd  | 2026-05-12 20:32:23 #9(controller) <gbuj7k>; cfg; rspamd_worker_monitored_on_change: broadcast monitored update for prfoy8xmhfi33r1b3ihzsex76bn8yqq: dead
+automail-rspamd  | 2026-05-12 20:32:23 #11(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for prfoy8xmhfi33r1b3ihzsex76bn8yqq: dead
+automail-rspamd  | 2026-05-12 20:32:23 #10(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for prfoy8xmhfi33r1b3ihzsex76bn8yqq: dead
+automail-rspamd  | 2026-05-12 20:32:23 #12(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for prfoy8xmhfi33r1b3ihzsex76bn8yqq: dead
+automail-rspamd  | 2026-05-12 20:32:23 #13(normal) <gbuj7k>; cfg; rspamd_worker_monitored_handler: updated monitored status for prfoy8xmhfi33r1b3ihzsex76bn8yqq: dead
+automail-rspamd  | 2026-05-12 20:32:37 #9(controller) <gbuj7k>; cfg; rspamd_controller_store_saved_stats: cannot open for writing controller stats from /var/lib/rspamd/stats.ucl.XXWEH5O3: Permission denied
+automail-rspamd  | 2026-05-12 20:33:35 #9(controller) <gbuj7k>; cfg; rspamd_controller_store_saved_stats: cannot open for writing controller stats from /var/lib/rspamd/stats.ucl.XXSB9GP3: Permission denied
+automail-rspamd  | 2026-05-12 20:34:18 #9(controller) <imhkkk>; monitored; rspamd_monitored_dns_cb: DNS query blocked on multi.uribl.com (127.0.0.1 returned), possibly due to high volume
+automail-rspamd  | 2026-05-12 20:34:34 #9(controller) <gbuj7k>; cfg; rspamd_controller_store_saved_stats: cannot open for writing controller stats from /var/lib/rspamd/stats.ucl.XXFWA3O3: Permission denied

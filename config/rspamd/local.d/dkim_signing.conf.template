@@ -1,9 +1,9 @@
 # DKIM signing configuration — domain injected by install.sh
-path = "/var/lib/rspamd/dkim/${MAIL_DOMAIN}.dkim.key";
+path = "/dkim/${MAIL_DOMAIN}.dkim.key";
 selector = "dkim";
 domain {
     ${MAIL_DOMAIN} {
-        path = "/var/lib/rspamd/dkim/${MAIL_DOMAIN}.dkim.key";
+        path = "/dkim/${MAIL_DOMAIN}.dkim.key";
         selector = "dkim";
     }
 }

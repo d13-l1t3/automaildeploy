@@ -64,8 +64,8 @@ services:
     volumes:
       - ./config/rspamd/local.d:/etc/rspamd/local.d:ro
       - ./config/rspamd/override.d:/etc/rspamd/override.d:ro
-      - ./dkim:/var/lib/rspamd/dkim:ro
-      - ./data/rspamd:/var/lib/rspamd
+      - ./dkim:/dkim:ro
+      - rspamd-data:/var/lib/rspamd
     environment:
       - TZ=${TZ}
     networks:
@@ -161,6 +161,8 @@ services:
 # ── Volumes ──────────────────────────────────────────────────────────────────
 volumes:
   mail-vmail:
+    driver: local
+  rspamd-data:
     driver: local
 
 # ── Networks ─────────────────────────────────────────────────────────────────
