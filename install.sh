@@ -92,60 +92,124 @@ banner "2/6 — Obtaining SSL/TLS Certificates"
 SSL_DIR="${CONFIG_DIR}/ssl"
 mkdir -p "$SSL_DIR"
 
-CERTBOT_FLAGS=()
-if [[ "${LETSENCRYPT_STAGING:-false}" == "true" ]]; then
-    CERTBOT_FLAGS+=(--staging)
-    warn "Using Let's Encrypt STAGING environment (certs will NOT be trusted)."
+# ── Detect whether this is a local/non-public domain ─────────────────────────
+# Certbot cannot issue certs for .local, .test, .lan, .internal, RFC-1918 IPs,
+# or when the LETSENCRYPT_EMAIL is not a real routable address.
+USE_SELFSIGNED=false
+
+# Check domain TLD
+case "${MAIL_HOSTNAME}" in
+    *.local|*.test|*.lan|*.internal|*.localhost|*.example|*.invalid)
+        USE_SELFSIGNED=true
+        warn "Non-public domain detected (${MAIL_HOSTNAME}). Will generate self-signed certificate."
+        ;;
+esac
+
+# Check for private/reserved IP
+if [[ "$USE_SELFSIGNED" == "false" ]]; then
+    case "${SERVER_IP}" in
+        10.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|192.168.*|127.*|169.254.*)
+            USE_SELFSIGNED=true
+            warn "Private IP detected (${SERVER_IP}). Will generate self-signed certificate."
+            ;;
+    esac
 fi
 
-CERT_LIVE="/etc/letsencrypt/live/${MAIL_HOSTNAME}"
-if [[ -f "${CERT_LIVE}/fullchain.pem" ]]; then
-    log "Certificate already exists for ${MAIL_HOSTNAME}, skipping issuance."
+# Check if certs already exist in project dir (manual or previous run)
+if [[ -f "${SSL_DIR}/fullchain.pem" && -f "${SSL_DIR}/privkey.pem" ]]; then
+    log "Certificates already present in ${SSL_DIR}, skipping generation."
+
+elif [[ "$USE_SELFSIGNED" == "true" ]]; then
+    # ── Generate self-signed certificate ──────────────────────────────────────
+    log "Generating self-signed certificate (valid 365 days) …"
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout "${SSL_DIR}/privkey.pem" \
+        -out    "${SSL_DIR}/fullchain.pem" \
+        -subj   "/CN=${MAIL_HOSTNAME}/O=AutoMailDeploy/C=US" \
+        -addext "subjectAltName=DNS:${MAIL_HOSTNAME},DNS:${MAIL_DOMAIN}" \
+        2>/dev/null
+    chmod 600 "${SSL_DIR}/privkey.pem"
+    log "Self-signed certificate created."
+    warn "Browsers and external mail servers will NOT trust this certificate."
+    warn "For production, use a real domain and set USE_SELFSIGNED to false."
+
 else
-    # Stop anything on port 80 temporarily
-    if ss -tlnp | grep -q ':80 '; then
-        warn "Port 80 is in use. Attempting to free it …"
-        fuser -k 80/tcp 2>/dev/null || true
-        sleep 2
+    # ── Let's Encrypt (public domain) ─────────────────────────────────────────
+    CERTBOT_FLAGS=()
+    if [[ "${LETSENCRYPT_STAGING:-false}" == "true" ]]; then
+        CERTBOT_FLAGS+=(--staging)
+        warn "Using Let's Encrypt STAGING environment (certs will NOT be trusted)."
     fi
 
-    log "Requesting certificate via standalone mode …"
-    if certbot certonly --standalone --non-interactive --agree-tos \
-        --email "${LETSENCRYPT_EMAIL}" \
-        -d "${MAIL_HOSTNAME}" \
-        "${CERTBOT_FLAGS[@]+"${CERTBOT_FLAGS[@]}"}"; then
-        log "Certificate obtained successfully."
+    CERT_LIVE="/etc/letsencrypt/live/${MAIL_HOSTNAME}"
+    if [[ -f "${CERT_LIVE}/fullchain.pem" ]]; then
+        log "Let's Encrypt certificate already exists for ${MAIL_HOSTNAME}."
     else
-        warn "Standalone failed (DNS may not have propagated). Retrying with --dry-run disabled and --preferred-challenges http …"
-        certbot certonly --standalone --non-interactive --agree-tos \
+        # Stop anything on port 80 temporarily
+        if ss -tlnp | grep -q ':80 '; then
+            warn "Port 80 is in use. Attempting to free it …"
+            fuser -k 80/tcp 2>/dev/null || true
+            sleep 2
+        fi
+
+        log "Requesting certificate via standalone mode …"
+        if certbot certonly --standalone --non-interactive --agree-tos \
             --email "${LETSENCRYPT_EMAIL}" \
             -d "${MAIL_HOSTNAME}" \
-            --preferred-challenges http \
-            "${CERTBOT_FLAGS[@]+"${CERTBOT_FLAGS[@]}"}" || {
-                err "Certificate issuance FAILED. Ensure DNS A record for ${MAIL_HOSTNAME} points to ${SERVER_IP} and port 80 is reachable."
-                err "You can retry with LETSENCRYPT_STAGING=true in .env for testing."
-                exit 1
-            }
-        log "Certificate obtained on retry."
+            "${CERTBOT_FLAGS[@]+"${CERTBOT_FLAGS[@]}"}"; then
+            log "Certificate obtained successfully."
+        else
+            warn "Standalone failed. Retrying with --preferred-challenges http …"
+            if certbot certonly --standalone --non-interactive --agree-tos \
+                --email "${LETSENCRYPT_EMAIL}" \
+                -d "${MAIL_HOSTNAME}" \
+                --preferred-challenges http \
+                "${CERTBOT_FLAGS[@]+"${CERTBOT_FLAGS[@]}"}"; then
+                log "Certificate obtained on retry."
+            else
+                warn "Certbot failed. Falling back to self-signed certificate."
+                openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                    -keyout "${SSL_DIR}/privkey.pem" \
+                    -out    "${SSL_DIR}/fullchain.pem" \
+                    -subj   "/CN=${MAIL_HOSTNAME}/O=AutoMailDeploy/C=US" \
+                    -addext "subjectAltName=DNS:${MAIL_HOSTNAME},DNS:${MAIL_DOMAIN}" \
+                    2>/dev/null
+                chmod 600 "${SSL_DIR}/privkey.pem"
+                log "Self-signed certificate created as fallback."
+            fi
+        fi
     fi
-fi
 
-# Copy certs into project SSL dir
-cp -L "${CERT_LIVE}/fullchain.pem" "${SSL_DIR}/fullchain.pem"
-cp -L "${CERT_LIVE}/privkey.pem"   "${SSL_DIR}/privkey.pem"
-chmod 600 "${SSL_DIR}/privkey.pem"
-log "Certificates copied to ${SSL_DIR}."
+    # Copy certs into project SSL dir (if obtained via certbot)
+    CERT_LIVE="/etc/letsencrypt/live/${MAIL_HOSTNAME}"
+    if [[ -f "${CERT_LIVE}/fullchain.pem" && ! -f "${SSL_DIR}/fullchain.pem" ]]; then
+        cp -L "${CERT_LIVE}/fullchain.pem" "${SSL_DIR}/fullchain.pem"
+        cp -L "${CERT_LIVE}/privkey.pem"   "${SSL_DIR}/privkey.pem"
+        chmod 600 "${SSL_DIR}/privkey.pem"
+        log "Certificates copied to ${SSL_DIR}."
+    fi
 
-# Certbot auto-renewal hook to copy certs and reload containers
-cat > /etc/letsencrypt/renewal-hooks/deploy/automaildeploy.sh <<HOOK
+    # Certbot auto-renewal hook (only if certbot succeeded)
+    if [[ -f "${CERT_LIVE}/fullchain.pem" ]]; then
+        mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+        cat > /etc/letsencrypt/renewal-hooks/deploy/automaildeploy.sh <<HOOK
 #!/usr/bin/env bash
 cp -L "${CERT_LIVE}/fullchain.pem" "${SSL_DIR}/fullchain.pem"
 cp -L "${CERT_LIVE}/privkey.pem"   "${SSL_DIR}/privkey.pem"
 chmod 600 "${SSL_DIR}/privkey.pem"
 cd "${SCRIPT_DIR}" && docker compose restart postfix dovecot nginx
 HOOK
-chmod +x /etc/letsencrypt/renewal-hooks/deploy/automaildeploy.sh
-log "Certbot auto-renewal hook installed."
+        chmod +x /etc/letsencrypt/renewal-hooks/deploy/automaildeploy.sh
+        log "Certbot auto-renewal hook installed."
+    fi
+fi
+
+# Final check — certs must exist at this point
+if [[ ! -f "${SSL_DIR}/fullchain.pem" || ! -f "${SSL_DIR}/privkey.pem" ]]; then
+    err "SSL certificates not found in ${SSL_DIR}. Cannot continue."
+    exit 1
+fi
+log "SSL/TLS certificates ready."
 
 ###############################################################################
 # 3. Generate DKIM keys
