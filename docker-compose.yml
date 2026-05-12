@@ -2,7 +2,6 @@
 #  AutoMailDeploy — Docker Compose Orchestration
 #  All variables are injected from .env by the install.sh script.
 ###############################################################################
-version: "3.8"
 
 services:
   # ── Postfix (SMTP) ─────────────────────────────────────────────────────────

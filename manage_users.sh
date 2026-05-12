@@ -57,7 +57,7 @@ cmd_add() {
 
     local hash
     hash=$(openssl passwd -6 "$pass")
-    echo "${email}:{SHA512-CRYPT}${hash}:::::" >> "$PASSWD_FILE"
+    echo "${email}:{CRYPT}${hash}:::::" >> "$PASSWD_FILE"
     echo "${email}  ${DOMAIN}/${user}/Maildir/" >> "$VMAP_FILE"
     chmod 600 "$PASSWD_FILE"
     log "Mailbox ${email} created."
@@ -89,7 +89,7 @@ cmd_passwd() {
 
     local hash
     hash=$(openssl passwd -6 "$pass")
-    sed -i "s|^${email}:.*|${email}:{SHA512-CRYPT}${hash}:::::|" "$PASSWD_FILE"
+    sed -i "s|^${email}:.*|${email}:{CRYPT}${hash}:::::|" "$PASSWD_FILE"
     chmod 600 "$PASSWD_FILE"
     log "Password changed for ${email}."
     reload_services

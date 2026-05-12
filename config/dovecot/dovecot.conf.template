@@ -21,7 +21,7 @@ auth_mechanisms = plain login
 
 passdb {
   driver = passwd-file
-  args = scheme=BLF-CRYPT /etc/dovecot/passwd
+  args = scheme=CRYPT /etc/dovecot/passwd
 }
 
 userdb {

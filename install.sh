@@ -270,9 +270,10 @@ envsubst '${MAIL_DOMAIN} ${MAIL_HOSTNAME}' \
     < "${CONFIG_DIR}/dovecot/dovecot.conf.template" \
     > "${CONFIG_DIR}/dovecot/dovecot.conf"
 
-# Generate passwd entries (Blowfish crypt)
+# Generate passwd entries
+# openssl passwd -6 produces $6$salt$hash (SHA-512 crypt), Dovecot's {CRYPT} scheme handles this.
 ADMIN_HASH=$(openssl passwd -6 "$ADMIN_PASSWORD")
-echo "${ADMIN_USER}@${MAIL_DOMAIN}:{SHA512-CRYPT}${ADMIN_HASH}:::::" \
+echo "${ADMIN_USER}@${MAIL_DOMAIN}:{CRYPT}${ADMIN_HASH}:::::" \
     > "${CONFIG_DIR}/dovecot/passwd"
 
 if [[ -n "${EXTRA_USERS:-}" ]]; then
@@ -281,7 +282,7 @@ if [[ -n "${EXTRA_USERS:-}" ]]; then
         uname="${pair%%:*}"
         upass="${pair#*:}"
         uhash=$(openssl passwd -6 "$upass")
-        echo "${uname}@${MAIL_DOMAIN}:{SHA512-CRYPT}${uhash}:::::" \
+        echo "${uname}@${MAIL_DOMAIN}:{CRYPT}${uhash}:::::" \
             >> "${CONFIG_DIR}/dovecot/passwd"
     done
 fi
@@ -319,6 +320,16 @@ log "Roundcube configs generated."
 banner "5/6 — Starting Docker Infrastructure"
 
 cd "$SCRIPT_DIR"
+
+# Fix line endings & permissions (in case repo was cloned on Windows)
+if command -v dos2unix &>/dev/null; then
+    dos2unix manage_users.sh docker/postfix/entrypoint.sh docker/dovecot/entrypoint.sh 2>/dev/null || true
+else
+    sed -i 's/\r$//' manage_users.sh docker/postfix/entrypoint.sh docker/dovecot/entrypoint.sh 2>/dev/null || true
+fi
+chmod +x manage_users.sh install.sh
+chmod +x docker/postfix/entrypoint.sh docker/dovecot/entrypoint.sh
+
 docker compose build --quiet
 docker compose up -d
 log "All containers started."
