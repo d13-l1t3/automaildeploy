@@ -1,0 +1,41 @@
+<?php
+/**
+ * AutoMailDeploy — Roundcube custom configuration
+ * Variables injected at install time.
+ */
+
+$config['product_name']   = 'Webmail — ${MAIL_DOMAIN}';
+$config['des_key']        = '${ROUNDCUBE_DES_KEY}';
+$config['skin']           = 'elastic';
+$config['language']       = 'en_US';
+
+// IMAP
+$config['imap_host']      = 'ssl://dovecot:993';
+$config['imap_conn_options'] = [
+    'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+];
+
+// SMTP
+$config['smtp_host']      = 'tls://postfix:587';
+$config['smtp_user']      = '%u';
+$config['smtp_pass']      = '%p';
+$config['smtp_conn_options'] = [
+    'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+];
+
+// Plugins
+$config['plugins'] = ['archive', 'zipdownload', 'managesieve'];
+
+// ManageSieve
+$config['managesieve_host'] = 'dovecot';
+$config['managesieve_port'] = 4190;
+
+// Security
+$config['force_https']       = true;
+$config['use_https']         = true;
+$config['login_autocomplete'] = 0;
+$config['ip_check']          = true;
+$config['session_lifetime']  = 30;
+
+// Drafts auto-save
+$config['draft_autosave']    = 60;
