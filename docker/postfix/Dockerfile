@@ -4,6 +4,6 @@ RUN apt-get update && \
       postfix postfix-pcre ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 EXPOSE 25 465 587
 ENTRYPOINT ["/entrypoint.sh"]
