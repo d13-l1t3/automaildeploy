@@ -64,21 +64,21 @@ done
 banner "2/14 — SSL/TLS Endpoints"
 
 # IMAPS (993)
-if openssl s_client -connect localhost:993 -quiet </dev/null 2>&1 | grep -q "Dovecot"; then
+if timeout 5 openssl s_client -connect localhost:993 -quiet </dev/null 2>&1 | grep -q "Dovecot"; then
     pass "IMAPS (993) — TLS handshake OK, Dovecot banner received"
 else
     fail "IMAPS (993) — TLS handshake failed"
 fi
 
 # SMTPS (465)
-if openssl s_client -connect localhost:465 -quiet </dev/null 2>&1 | grep -qi "ssl\|depth"; then
+if timeout 5 openssl s_client -connect localhost:465 -quiet </dev/null 2>&1 | grep -qi "ssl\|depth"; then
     pass "SMTPS (465) — TLS handshake OK"
 else
     fail "SMTPS (465) — TLS handshake failed"
 fi
 
 # Submission STARTTLS (587)
-if openssl s_client -starttls smtp -connect localhost:587 -quiet </dev/null 2>&1 | grep -qi "CHUNKING\|depth"; then
+if timeout 5 openssl s_client -starttls smtp -connect localhost:587 -quiet </dev/null 2>&1 | grep -qi "CHUNKING\|depth"; then
     pass "Submission (587) — STARTTLS OK"
 else
     fail "Submission (587) — STARTTLS failed"
@@ -91,7 +91,7 @@ banner "3/14 — IMAP Authentication"
 
 # Correct credentials
 IMAP_RESULT=$(echo -e "a1 LOGIN ${ADMIN_USER}@${MAIL_DOMAIN} \"${ADMIN_PASSWORD}\"\na2 LOGOUT" \
-    | openssl s_client -connect localhost:993 -quiet 2>/dev/null)
+    | timeout 5 openssl s_client -connect localhost:993 -quiet 2>/dev/null)
 if echo "$IMAP_RESULT" | grep -q "a1 OK"; then
     pass "IMAP login with correct credentials (${ADMIN_USER}@${MAIL_DOMAIN})"
 else
@@ -100,7 +100,7 @@ fi
 
 # Wrong credentials (must fail)
 IMAP_BAD=$(echo -e "a1 LOGIN fakeuser@${MAIL_DOMAIN} \"wrongpassword\"\na2 LOGOUT" \
-    | openssl s_client -connect localhost:993 -quiet 2>/dev/null)
+    | timeout 5 openssl s_client -connect localhost:993 -quiet 2>/dev/null)
 if echo "$IMAP_BAD" | grep -qi "NO.*AUTHENTICATIONFAILED\|NO.*authentication"; then
     pass "IMAP login with wrong credentials correctly rejected"
 else
