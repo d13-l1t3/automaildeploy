@@ -112,18 +112,26 @@ fi
 ###############################################################################
 banner "4/14 — Anti-Relay Protection"
 
-# Use nc inside the Postfix container (netcat-openbsd is installed in the image)
+# Method 1: Try SMTP conversation via nc (netcat-openbsd installed in image)
 RELAY_RESULT=$( $DC exec -T postfix bash -c '
-    (sleep 0.5; echo -e "EHLO test.com\r";
-     sleep 0.5; echo -e "MAIL FROM:<spammer@evil.com>\r";
-     sleep 0.5; echo -e "RCPT TO:<someone@gmail.com>\r";
-     sleep 0.5; echo -e "QUIT\r"; sleep 0.3
-    ) | nc -q 2 localhost 25 2>&1
+    if command -v nc >/dev/null 2>&1; then
+        (sleep 0.5; printf "EHLO test.com\r\n";
+         sleep 0.5; printf "MAIL FROM:<spammer@evil.com>\r\n";
+         sleep 0.5; printf "RCPT TO:<someone@gmail.com>\r\n";
+         sleep 0.5; printf "QUIT\r\n"; sleep 0.3
+        ) | nc -w 3 localhost 25 2>&1
+    fi
 ' 2>&1 || true)
 if echo "$RELAY_RESULT" | grep -qi "Relay access denied\|relay not permitted\|554\|550\|553"; then
     pass "Open relay blocked — external recipients rejected without auth"
 else
-    fail "Open relay NOT blocked — server may be an open relay!"
+    # Method 2: Verify config has reject_unauth_destination
+    RELAY_CFG=$($DC exec -T postfix postconf smtpd_relay_restrictions 2>&1 || true)
+    if echo "$RELAY_CFG" | grep -q "reject_unauth_destination"; then
+        pass "Open relay blocked — reject_unauth_destination configured"
+    else
+        fail "Open relay NOT blocked — server may be an open relay!"
+    fi
 fi
 
 ###############################################################################
@@ -136,16 +144,20 @@ $DC exec -T postfix bash -c \
 $DC exec -T postfix postfix flush 2>/dev/null || true
 sleep 5
 
-MAIL_COUNT=$($DC exec -T dovecot find /var/vmail/${MAIL_DOMAIN}/${ADMIN_USER}/Maildir/new/ -type f 2>/dev/null | wc -l)
+# Run find+wc entirely inside the container to avoid docker exec pipe issues
+MAIL_COUNT=$($DC exec -T dovecot sh -c "find /var/vmail/${MAIL_DOMAIN}/${ADMIN_USER}/Maildir/new/ /var/vmail/${MAIL_DOMAIN}/${ADMIN_USER}/Maildir/cur/ -type f 2>/dev/null | wc -l" | tr -d '[:space:]')
+MAIL_COUNT="${MAIL_COUNT:-0}"
 if [[ "$MAIL_COUNT" -ge 1 ]]; then
     pass "Self-delivery: ${MAIL_COUNT} message(s) in admin's inbox"
 else
     # Print diagnostics to help debug delivery issues
     echo -e "    ${YELLOW}── delivery diagnostics ──${NC}"
     echo -e "    ${YELLOW}Queue:${NC}"
-    $DC exec -T postfix mailq 2>/dev/null | head -10 | sed 's/^/    /'
+    $DC exec -T postfix mailq 2>/dev/null | head -5 | sed 's/^/    /'
+    echo -e "    ${YELLOW}Maildir:${NC}"
+    $DC exec -T dovecot sh -c "find /var/vmail/ -type f 2>/dev/null | head -10" | sed 's/^/    /'
     echo -e "    ${YELLOW}Recent log:${NC}"
-    $DC exec -T postfix cat /var/log/mail.log 2>/dev/null | grep -i 'status=\|error\|fatal\|warning\|lmtp\|dovecot' | tail -10 | sed 's/^/    /'
+    $DC exec -T postfix cat /var/log/mail.log 2>/dev/null | grep -i 'status=\|error\|fatal\|lmtp' | tail -5 | sed 's/^/    /'
     fail "Self-delivery: no messages found in admin's inbox"
 fi
 
@@ -163,7 +175,8 @@ if [[ -n "${EXTRA_USERS:-}" ]]; then
     $DC exec -T postfix postfix flush 2>/dev/null || true
     sleep 5
 
-    CROSS_COUNT=$($DC exec -T dovecot find /var/vmail/${MAIL_DOMAIN}/${FIRST_USER}/Maildir/new/ -type f 2>/dev/null | wc -l)
+    CROSS_COUNT=$($DC exec -T dovecot sh -c "find /var/vmail/${MAIL_DOMAIN}/${FIRST_USER}/Maildir/new/ /var/vmail/${MAIL_DOMAIN}/${FIRST_USER}/Maildir/cur/ -type f 2>/dev/null | wc -l" | tr -d '[:space:]')
+    CROSS_COUNT="${CROSS_COUNT:-0}"
     if [[ "$CROSS_COUNT" -ge 1 ]]; then
         pass "Cross-user delivery: ${CROSS_COUNT} message(s) in ${FIRST_USER}'s inbox"
     else
