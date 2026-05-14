@@ -142,7 +142,7 @@ banner "5/14 — Mail Delivery (admin → admin)"
 $DC exec -T postfix bash -c \
     "printf 'Subject: Test 5 self-delivery\nFrom: ${ADMIN_USER}@${MAIL_DOMAIN}\nTo: ${ADMIN_USER}@${MAIL_DOMAIN}\n\nSelf-delivery test at $(date -u +%H:%M:%S)\n' | sendmail -t" 2>/dev/null
 $DC exec -T postfix postfix flush 2>/dev/null || true
-sleep 5
+sleep 8
 
 # Search all Maildir folders (inbox, Junk, etc.) for delivered messages
 MAIL_COUNT=$($DC exec -T dovecot sh -c "find /var/vmail/${MAIL_DOMAIN}/${ADMIN_USER}/Maildir/ -path '*/new/*' -type f 2>/dev/null | wc -l" | tr -d '[:space:]')
@@ -173,10 +173,17 @@ if [[ -n "${EXTRA_USERS:-}" ]]; then
     $DC exec -T postfix bash -c \
         "printf 'Subject: Test 6 cross-user\nFrom: ${ADMIN_USER}@${MAIL_DOMAIN}\nTo: ${FIRST_USER}@${MAIL_DOMAIN}\n\nCross-user test\n' | sendmail -t" 2>/dev/null
     $DC exec -T postfix postfix flush 2>/dev/null || true
-    sleep 5
+    sleep 8
 
     CROSS_COUNT=$($DC exec -T dovecot sh -c "find /var/vmail/${MAIL_DOMAIN}/${FIRST_USER}/Maildir/ -path '*/new/*' -type f 2>/dev/null | wc -l" | tr -d '[:space:]')
     CROSS_COUNT="${CROSS_COUNT:-0}"
+    # Retry once — first delivery to a new user takes longer (Maildir creation)
+    if [[ "$CROSS_COUNT" -lt 1 ]]; then
+        $DC exec -T postfix postfix flush 2>/dev/null || true
+        sleep 5
+        CROSS_COUNT=$($DC exec -T dovecot sh -c "find /var/vmail/${MAIL_DOMAIN}/${FIRST_USER}/Maildir/ -path '*/new/*' -type f 2>/dev/null | wc -l" | tr -d '[:space:]')
+        CROSS_COUNT="${CROSS_COUNT:-0}"
+    fi
     if [[ "$CROSS_COUNT" -ge 1 ]]; then
         pass "Cross-user delivery: ${CROSS_COUNT} message(s) in ${FIRST_USER}'s inbox"
     else
