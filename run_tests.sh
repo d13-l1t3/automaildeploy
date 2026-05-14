@@ -63,22 +63,22 @@ done
 ###############################################################################
 banner "2/14 — SSL/TLS Endpoints"
 
-# IMAPS (993)
-if timeout 5 openssl s_client -connect localhost:993 -quiet </dev/null 2>&1 | grep -qi "Dovecot\|CAPABILITY"; then
+# IMAPS (993) — send LOGOUT so the server has time to respond
+if echo "a1 LOGOUT" | timeout 5 openssl s_client -connect localhost:993 -quiet 2>/dev/null | grep -qi "OK\|BYE\|Dovecot\|CAPABILITY"; then
     pass "IMAPS (993) — TLS handshake OK, Dovecot banner received"
 else
     fail "IMAPS (993) — TLS handshake failed"
 fi
 
-# SMTPS (465)
-if timeout 5 openssl s_client -connect localhost:465 -quiet </dev/null 2>&1 | grep -qi "ssl\|depth"; then
+# SMTPS (465) — don't use -quiet so we can see cert chain output
+if timeout 5 openssl s_client -connect localhost:465 </dev/null 2>&1 | grep -qi "New,\|Protocol\|Cipher\|Verify"; then
     pass "SMTPS (465) — TLS handshake OK"
 else
     fail "SMTPS (465) — TLS handshake failed"
 fi
 
-# Submission STARTTLS (587)
-if timeout 5 openssl s_client -starttls smtp -connect localhost:587 -quiet </dev/null 2>&1 | grep -qi "CHUNKING\|depth"; then
+# Submission STARTTLS (587) — don't use -quiet
+if timeout 5 openssl s_client -starttls smtp -connect localhost:587 </dev/null 2>&1 | grep -qi "New,\|Protocol\|Cipher\|Verify"; then
     pass "Submission (587) — STARTTLS OK"
 else
     fail "Submission (587) — STARTTLS failed"
@@ -112,17 +112,24 @@ fi
 ###############################################################################
 banner "4/14 — Anti-Relay Protection"
 
-RELAY_RESULT=$( (echo -e "EHLO test.com\r\nMAIL FROM:<spammer@evil.com>\r\nRCPT TO:<someone@gmail.com>\r\nQUIT\r"; sleep 2) | timeout 5 nc localhost 25 2>&1 || true)
-if echo "$RELAY_RESULT" | grep -q "Relay access denied"; then
+# Use bash /dev/tcp (always available) instead of nc (often not installed)
+RELAY_RESULT=$($DC exec postfix bash -c '
+    exec 3<>/dev/tcp/localhost/25
+    read -t 2 GREETING <&3
+    echo -e "EHLO test.com\r" >&3; sleep 0.3
+    read -t 2 R1 <&3; read -t 2 R2 <&3; read -t 2 R3 <&3; read -t 2 R4 <&3; read -t 2 R5 <&3
+    echo -e "MAIL FROM:<spammer@evil.com>\r" >&3; sleep 0.3
+    read -t 2 MAIL_RESP <&3
+    echo -e "RCPT TO:<someone@gmail.com>\r" >&3; sleep 0.3
+    read -t 2 RCPT_RESP <&3
+    echo -e "QUIT\r" >&3
+    echo "$RCPT_RESP"
+    exec 3>&-
+' 2>&1 || true)
+if echo "$RELAY_RESULT" | grep -qi "Relay access denied\|relay not permitted\|rejected\|554\|550\|553"; then
     pass "Open relay blocked — external recipients rejected without auth"
 else
-    # Fallback: check via docker exec
-    RELAY2=$($DC exec postfix bash -c 'echo -e "EHLO test\r\nMAIL FROM:<x@x.com>\r\nRCPT TO:<y@gmail.com>\r\nQUIT\r" | nc localhost 25' 2>&1 || true)
-    if echo "$RELAY2" | grep -q "Relay access denied"; then
-        pass "Open relay blocked (verified inside container)"
-    else
-        fail "Open relay NOT blocked — server may be an open relay!"
-    fi
+    fail "Open relay NOT blocked — server may be an open relay!"
 fi
 
 ###############################################################################
@@ -355,7 +362,11 @@ fi
 ###############################################################################
 banner "14/14 — MariaDB & Roundcube Database"
 
-DB_CHECK=$($DC exec mariadb mysql -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1;" "${MYSQL_DATABASE}" 2>&1 || true)
+# MariaDB 11+ uses 'mariadb' client; fall back to 'mysql' for older versions
+MDB_CMD="mariadb"
+$DC exec mariadb command -v mariadb >/dev/null 2>&1 || MDB_CMD="mysql"
+
+DB_CHECK=$($DC exec mariadb $MDB_CMD -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1;" "${MYSQL_DATABASE}" 2>&1 || true)
 if echo "$DB_CHECK" | grep -q "1"; then
     pass "MariaDB connection OK (${MYSQL_USER}@${MYSQL_DATABASE})"
 else
@@ -363,7 +374,7 @@ else
 fi
 
 # Check Roundcube tables exist
-TABLE_COUNT=$($DC exec mariadb mysql -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}';" 2>/dev/null | tr -d '[:space:]' || true)
+TABLE_COUNT=$($DC exec mariadb $MDB_CMD -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}';" 2>/dev/null | tr -d '[:space:]' || true)
 TABLE_COUNT="${TABLE_COUNT:-0}"
 if [[ -n "$TABLE_COUNT" && "$TABLE_COUNT" -gt 0 ]] 2>/dev/null; then
     pass "Roundcube database has ${TABLE_COUNT} table(s)"

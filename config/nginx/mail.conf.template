@@ -1,7 +1,7 @@
 # ── Redirect HTTP → HTTPS ─────────────────────────────────────────────────────
 server {
-    listen 80;
-    server_name ${MAIL_HOSTNAME};
+    listen 80 default_server;
+    server_name ${MAIL_HOSTNAME} _;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -15,9 +15,9 @@ server {
 
 # ── Main HTTPS server (Roundcube + Rspamd UI) ────────────────────────────────
 server {
-    listen 443 ssl;
+    listen 443 ssl default_server;
     http2 on;
-    server_name ${MAIL_HOSTNAME};
+    server_name ${MAIL_HOSTNAME} _;
 
     ssl_certificate     /etc/ssl/mail/fullchain.pem;
     ssl_certificate_key /etc/ssl/mail/privkey.pem;

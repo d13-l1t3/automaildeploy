@@ -240,6 +240,10 @@ banner "4/6 — Generating Service Configurations"
 
 mkdir -p "${DATA_DIR}"/{postfix/spool,postfix/log,dovecot,redis,mariadb,roundcube,rspamd,nginx/log}
 
+# Rspamd runs as _rspamd user (UID varies by image version).
+# The bind-mounted data dir must be writable by that user.
+chmod 777 "${DATA_DIR}/rspamd"
+
 # Export all variables for envsubst
 export MAIL_DOMAIN MAIL_HOSTNAME SERVER_IP ROUNDCUBE_DES_KEY
 
