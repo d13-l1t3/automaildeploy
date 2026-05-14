@@ -10,7 +10,7 @@ Automated, single-server enterprise email infrastructure deployed via Docker Com
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/yourorg/automaildeploy.git
+git clone https://github.com/d13-l1t3/automaildeploy.git
 cd automaildeploy
 
 # 2. Create and edit your configuration
