@@ -256,9 +256,9 @@ done
 # ── Postfix ──────────────────────────────────────────────────────────────────
 envsubst '${MAIL_DOMAIN} ${MAIL_HOSTNAME}' \
     < "${CONFIG_DIR}/postfix/main.cf.template" \
-    > "${CONFIG_DIR}/postfix/main.cf"
+    | sed 's/\r$//' > "${CONFIG_DIR}/postfix/main.cf"
 
-cp "${CONFIG_DIR}/postfix/master.cf.template" "${CONFIG_DIR}/postfix/master.cf"
+sed 's/\r$//' "${CONFIG_DIR}/postfix/master.cf.template" > "${CONFIG_DIR}/postfix/master.cf"
 
 # Virtual domains and mailboxes
 echo "${MAIL_DOMAIN}  OK" > "${CONFIG_DIR}/postfix/virtual_mailbox_domains"
@@ -278,7 +278,7 @@ log "Postfix configs generated."
 # ── Dovecot ──────────────────────────────────────────────────────────────────
 envsubst '${MAIL_DOMAIN} ${MAIL_HOSTNAME}' \
     < "${CONFIG_DIR}/dovecot/dovecot.conf.template" \
-    > "${CONFIG_DIR}/dovecot/dovecot.conf"
+    | sed 's/\r$//' > "${CONFIG_DIR}/dovecot/dovecot.conf"
 
 # Generate passwd entries
 # openssl passwd -6 produces $6$salt$hash (SHA-512 crypt), Dovecot's {CRYPT} scheme handles this.
@@ -302,26 +302,27 @@ log "Dovecot configs generated."
 # ── Rspamd ───────────────────────────────────────────────────────────────────
 # Hash the Rspamd web password (pbkdf2 via controller)
 # Fallback: store as plain until first rspamd container start
-export RSPAMD_HASHED_PASSWORD="\$2\$${RSPAMD_PASSWORD}"  # will be re-hashed on first start
+# Store password as-is; Rspamd accepts plaintext and hashes internally on first use
+export RSPAMD_HASHED_PASSWORD="${RSPAMD_PASSWORD}"
 envsubst '${RSPAMD_HASHED_PASSWORD}' \
     < "${CONFIG_DIR}/rspamd/local.d/worker-controller.inc.template" \
-    > "${CONFIG_DIR}/rspamd/local.d/worker-controller.inc"
+    | sed 's/\r$//' > "${CONFIG_DIR}/rspamd/local.d/worker-controller.inc"
 
 envsubst '${MAIL_DOMAIN}' \
     < "${CONFIG_DIR}/rspamd/local.d/dkim_signing.conf.template" \
-    > "${CONFIG_DIR}/rspamd/local.d/dkim_signing.conf"
+    | sed 's/\r$//' > "${CONFIG_DIR}/rspamd/local.d/dkim_signing.conf"
 log "Rspamd configs generated."
 
 # ── Nginx ────────────────────────────────────────────────────────────────────
 envsubst '${MAIL_HOSTNAME}' \
     < "${CONFIG_DIR}/nginx/mail.conf.template" \
-    > "${CONFIG_DIR}/nginx/mail.conf"
+    | sed 's/\r$//' > "${CONFIG_DIR}/nginx/mail.conf"
 log "Nginx configs generated."
 
 # ── Roundcube ────────────────────────────────────────────────────────────────
 envsubst '${MAIL_DOMAIN} ${ROUNDCUBE_DES_KEY}' \
     < "${CONFIG_DIR}/roundcube/config.inc.php.template" \
-    > "${CONFIG_DIR}/roundcube/config.inc.php"
+    | sed 's/\r$//' > "${CONFIG_DIR}/roundcube/config.inc.php"
 log "Roundcube configs generated."
 
 ###############################################################################

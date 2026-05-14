@@ -126,7 +126,7 @@ services:
       - ROUNDCUBEMAIL_SKIN=elastic
       - TZ=${TZ}
     volumes:
-      - ./config/roundcube/config.inc.php:/var/roundcube/config/custom.inc.php:ro
+      - ./config/roundcube/config.inc.php:/var/roundcube/config/config.inc.php:ro
       - ./data/roundcube:/var/roundcube/db
     networks:
       mailnet:

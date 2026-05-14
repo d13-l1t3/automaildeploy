@@ -35,12 +35,10 @@ usage() {
 reload_services() {
     log "Reloading Postfix and Dovecot …"
     cd "$SCRIPT_DIR"
-    # Re-generate postmap
-    docker compose exec postfix postmap /etc/postfix/virtual_mailbox_maps 2>/dev/null || true
-    # Copy updated passwd into container and reload
+    # Copy updated passwd into Dovecot container and reload
     docker compose cp "${PASSWD_FILE}" dovecot:/etc/dovecot/passwd 2>/dev/null || true
     docker compose exec dovecot doveadm reload 2>/dev/null || true
-    # Copy updated virtual maps into container
+    # Copy updated virtual maps into Postfix container, THEN postmap the new data
     docker compose cp "${VMAP_FILE}" postfix:/etc/postfix/virtual_mailbox_maps 2>/dev/null || true
     docker compose exec postfix postmap /etc/postfix/virtual_mailbox_maps 2>/dev/null || true
     docker compose exec postfix postfix reload 2>/dev/null || true

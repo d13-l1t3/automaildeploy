@@ -1,0 +1,21 @@
+# AutoMailDeploy — Force LF line endings for all text files
+# Prevents Windows CRLF from corrupting configs inside Linux containers.
+* text=auto eol=lf
+
+# Explicitly mark shell scripts and config templates
+*.sh text eol=lf
+*.conf text eol=lf
+*.template text eol=lf
+*.cf text eol=lf
+*.inc text eol=lf
+*.php text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+
+# Binary files — no conversion
+*.pem binary
+*.key binary
+*.pub binary
+*.db binary
