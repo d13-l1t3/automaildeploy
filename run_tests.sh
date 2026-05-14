@@ -113,14 +113,18 @@ fi
 banner "4/14 — Anti-Relay Protection"
 
 # Use bash /dev/tcp (always available) instead of nc (often not installed)
-RELAY_RESULT=$($DC exec postfix bash -c '
+# EHLO returns 10+ lines; drain them all before sending MAIL FROM
+RELAY_RESULT=$($DC exec -T postfix bash -c '
     exec 3<>/dev/tcp/localhost/25
-    read -t 2 GREETING <&3
-    echo -e "EHLO test.com\r" >&3; sleep 0.3
-    read -t 2 R1 <&3; read -t 2 R2 <&3; read -t 2 R3 <&3; read -t 2 R4 <&3; read -t 2 R5 <&3
-    echo -e "MAIL FROM:<spammer@evil.com>\r" >&3; sleep 0.3
+    read -t 3 GREETING <&3
+    echo -e "EHLO test.com\r" >&3
+    while IFS= read -t 2 -r L <&3; do
+        [[ "$L" == "250 "* ]] && break
+        [[ "$L" != "250-"* ]] && break
+    done
+    echo -e "MAIL FROM:<spammer@evil.com>\r" >&3
     read -t 2 MAIL_RESP <&3
-    echo -e "RCPT TO:<someone@gmail.com>\r" >&3; sleep 0.3
+    echo -e "RCPT TO:<someone@gmail.com>\r" >&3
     read -t 2 RCPT_RESP <&3
     echo -e "QUIT\r" >&3
     echo "$RCPT_RESP"
@@ -137,9 +141,10 @@ fi
 ###############################################################################
 banner "5/14 — Mail Delivery (admin → admin)"
 
-$DC exec postfix bash -c \
+$DC exec -T postfix bash -c \
     "printf 'Subject: Test 5 self-delivery\nFrom: ${ADMIN_USER}@${MAIL_DOMAIN}\nTo: ${ADMIN_USER}@${MAIL_DOMAIN}\n\nSelf-delivery test at $(date -u +%H:%M:%S)\n' | sendmail -t" 2>/dev/null
-sleep 3
+$DC exec -T postfix postfix flush 2>/dev/null || true
+sleep 5
 
 MAIL_COUNT=$($DC exec dovecot find /var/vmail/${MAIL_DOMAIN}/${ADMIN_USER}/Maildir/new/ -type f 2>/dev/null | wc -l)
 if [[ "$MAIL_COUNT" -ge 1 ]]; then
@@ -157,9 +162,10 @@ banner "6/14 — Cross-User Delivery"
 if [[ -n "${EXTRA_USERS:-}" ]]; then
     FIRST_USER="${EXTRA_USERS%%:*}"
 
-    $DC exec postfix bash -c \
+    $DC exec -T postfix bash -c \
         "printf 'Subject: Test 6 cross-user\nFrom: ${ADMIN_USER}@${MAIL_DOMAIN}\nTo: ${FIRST_USER}@${MAIL_DOMAIN}\n\nCross-user test\n' | sendmail -t" 2>/dev/null
-    sleep 3
+    $DC exec -T postfix postfix flush 2>/dev/null || true
+    sleep 5
 
     CROSS_COUNT=$($DC exec dovecot find /var/vmail/${MAIL_DOMAIN}/${FIRST_USER}/Maildir/new/ -type f 2>/dev/null | wc -l)
     if [[ "$CROSS_COUNT" -ge 1 ]]; then
@@ -184,8 +190,8 @@ else
     fail "Rspamd milter: ${MILTER_ERRORS} connection error(s) in Postfix log"
 fi
 
-# Rspamd permission errors
-PERM_ERRORS=$($DC logs rspamd 2>&1 | grep -c "Permission denied" || true)
+# Rspamd permission errors (check only recent log lines from this session)
+PERM_ERRORS=$($DC logs --since 2m rspamd 2>&1 | grep -c "Permission denied" || true)
 if [[ "$PERM_ERRORS" -eq 0 ]]; then
     pass "Rspamd data volume — no permission errors"
 else
@@ -362,19 +368,21 @@ fi
 ###############################################################################
 banner "14/14 — MariaDB & Roundcube Database"
 
-# MariaDB 11+ uses 'mariadb' client; fall back to 'mysql' for older versions
-MDB_CMD="mariadb"
-$DC exec mariadb command -v mariadb >/dev/null 2>&1 || MDB_CMD="mysql"
-
-DB_CHECK=$($DC exec mariadb $MDB_CMD -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1;" "${MYSQL_DATABASE}" 2>&1 || true)
+# MariaDB 11+ uses 'mariadb' client; try it first, fall back to 'mysql'
+DB_CHECK=$($DC exec -T mariadb mariadb -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1;" "${MYSQL_DATABASE}" 2>&1 || \
+           $DC exec -T mariadb mysql -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1;" "${MYSQL_DATABASE}" 2>&1 || true)
 if echo "$DB_CHECK" | grep -q "1"; then
     pass "MariaDB connection OK (${MYSQL_USER}@${MYSQL_DATABASE})"
 else
     fail "MariaDB connection failed"
 fi
 
+# Detect which client command works
+MDB_CMD="mariadb"
+$DC exec -T mariadb bash -c 'command -v mariadb' >/dev/null 2>&1 || MDB_CMD="mysql"
+
 # Check Roundcube tables exist
-TABLE_COUNT=$($DC exec mariadb $MDB_CMD -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}';" 2>/dev/null | tr -d '[:space:]' || true)
+TABLE_COUNT=$($DC exec -T mariadb $MDB_CMD -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}';" 2>/dev/null | tr -d '[:space:]' || true)
 TABLE_COUNT="${TABLE_COUNT:-0}"
 if [[ -n "$TABLE_COUNT" && "$TABLE_COUNT" -gt 0 ]] 2>/dev/null; then
     pass "Roundcube database has ${TABLE_COUNT} table(s)"

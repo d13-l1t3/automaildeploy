@@ -345,6 +345,14 @@ fi
 chmod +x manage_users.sh install.sh
 chmod +x docker/postfix/entrypoint.sh docker/dovecot/entrypoint.sh
 
+# Clear stale Postfix spool data from previous runs.
+# Bind-mounted spool survives `docker compose down -v`, and stale PID/queue
+# files from a dead container can block mail delivery in the new one.
+if [[ -d "${DATA_DIR}/postfix/spool" ]]; then
+    log "Cleaning stale Postfix spool data …"
+    rm -rf "${DATA_DIR}/postfix/spool"/*
+fi
+
 docker compose build --quiet
 docker compose up -d
 log "All containers started."
