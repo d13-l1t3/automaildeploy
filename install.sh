@@ -241,7 +241,10 @@ banner "4/6 — Generating Service Configurations"
 mkdir -p "${DATA_DIR}"/{postfix/spool,postfix/log,dovecot,redis,mariadb,roundcube,rspamd,nginx/log}
 
 # Rspamd runs as _rspamd user (UID varies by image version).
-# The bind-mounted data dir must be writable by that user.
+# Clean leftover data from previous runs (wrong ownership causes Permission denied).
+if [[ -d "${DATA_DIR}/rspamd" ]]; then
+    rm -rf "${DATA_DIR}/rspamd"/*  2>/dev/null || true
+fi
 chmod 777 "${DATA_DIR}/rspamd"
 
 # Export all variables for envsubst
