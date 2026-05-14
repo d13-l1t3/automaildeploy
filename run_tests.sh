@@ -144,8 +144,8 @@ $DC exec -T postfix bash -c \
 $DC exec -T postfix postfix flush 2>/dev/null || true
 sleep 5
 
-# Run find+wc entirely inside the container to avoid docker exec pipe issues
-MAIL_COUNT=$($DC exec -T dovecot sh -c "find /var/vmail/${MAIL_DOMAIN}/${ADMIN_USER}/Maildir/new/ /var/vmail/${MAIL_DOMAIN}/${ADMIN_USER}/Maildir/cur/ -type f 2>/dev/null | wc -l" | tr -d '[:space:]')
+# Search all Maildir folders (inbox, Junk, etc.) for delivered messages
+MAIL_COUNT=$($DC exec -T dovecot sh -c "find /var/vmail/${MAIL_DOMAIN}/${ADMIN_USER}/Maildir/ -path '*/new/*' -type f 2>/dev/null | wc -l" | tr -d '[:space:]')
 MAIL_COUNT="${MAIL_COUNT:-0}"
 if [[ "$MAIL_COUNT" -ge 1 ]]; then
     pass "Self-delivery: ${MAIL_COUNT} message(s) in admin's inbox"
@@ -175,7 +175,7 @@ if [[ -n "${EXTRA_USERS:-}" ]]; then
     $DC exec -T postfix postfix flush 2>/dev/null || true
     sleep 5
 
-    CROSS_COUNT=$($DC exec -T dovecot sh -c "find /var/vmail/${MAIL_DOMAIN}/${FIRST_USER}/Maildir/new/ /var/vmail/${MAIL_DOMAIN}/${FIRST_USER}/Maildir/cur/ -type f 2>/dev/null | wc -l" | tr -d '[:space:]')
+    CROSS_COUNT=$($DC exec -T dovecot sh -c "find /var/vmail/${MAIL_DOMAIN}/${FIRST_USER}/Maildir/ -path '*/new/*' -type f 2>/dev/null | wc -l" | tr -d '[:space:]')
     CROSS_COUNT="${CROSS_COUNT:-0}"
     if [[ "$CROSS_COUNT" -ge 1 ]]; then
         pass "Cross-user delivery: ${CROSS_COUNT} message(s) in ${FIRST_USER}'s inbox"

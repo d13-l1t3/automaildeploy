@@ -34,22 +34,18 @@ mkdir -p /var/vmail
 chown vmail:vmail /var/vmail
 
 # ── Create default Sieve script (spam → Junk folder) ─────────────────────────
+# Recreate on every start to pick up fixes
 mkdir -p /var/vmail/sieve
-if [[ ! -f /var/vmail/sieve/default.sieve ]]; then
-    cat > /var/vmail/sieve/default.sieve << 'SIEVE'
+cat > /var/vmail/sieve/default.sieve << 'SIEVE'
 require ["fileinto", "mailbox"];
 
-# Messages flagged as spam by Rspamd get filed into Junk
+# Only file messages explicitly flagged as spam by Rspamd (score >= add_header threshold)
+# The X-Spam header is added by Rspamd only when score exceeds the "add_header" action (6+)
 if header :contains "X-Spam" "Yes" {
     fileinto :create "Junk";
     stop;
 }
-if header :contains "X-Spamd-Bar" "++++" {
-    fileinto :create "Junk";
-    stop;
-}
 SIEVE
-fi
 chown -R vmail:vmail /var/vmail/sieve
 sievec /var/vmail/sieve/default.sieve 2>/dev/null || true
 
