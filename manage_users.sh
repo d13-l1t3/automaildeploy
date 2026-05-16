@@ -46,7 +46,9 @@ reload_services() {
 }
 
 cmd_add() {
-    local user="$1" pass="$2"
+    local user pass
+    user=$(echo "$1" | tr 'A-Z' 'a-z')
+    pass="$2"
     local email="${user}@${DOMAIN}"
 
     if grep -q "^${email}:" "$PASSWD_FILE" 2>/dev/null; then

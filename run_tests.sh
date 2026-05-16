@@ -168,7 +168,7 @@ banner "6/14 — Cross-User Delivery"
 
 # Get first extra user (if defined)
 if [[ -n "${EXTRA_USERS:-}" ]]; then
-    FIRST_USER="${EXTRA_USERS%%:*}"
+    FIRST_USER=$(echo "${EXTRA_USERS%%:*}" | tr 'A-Z' 'a-z')
 
     $DC exec -T postfix bash -c \
         "printf 'Subject: Test 6 cross-user\nFrom: ${ADMIN_USER}@${MAIL_DOMAIN}\nTo: ${FIRST_USER}@${MAIL_DOMAIN}\n\nCross-user test\n' | sendmail -t" 2>/dev/null

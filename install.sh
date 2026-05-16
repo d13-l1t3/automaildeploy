@@ -268,14 +268,16 @@ envsubst '${MAIL_DOMAIN} ${MAIL_HOSTNAME}' \
 sed 's/\r$//' "${CONFIG_DIR}/postfix/master.cf.template" > "${CONFIG_DIR}/postfix/master.cf"
 
 # Virtual domains and mailboxes
+# Lowercase usernames — email local parts are case-insensitive (RFC 5321)
+ADMIN_LC=$(echo "${ADMIN_USER}" | tr 'A-Z' 'a-z')
 echo "${MAIL_DOMAIN}  OK" > "${CONFIG_DIR}/postfix/virtual_mailbox_domains"
-echo "${ADMIN_USER}@${MAIL_DOMAIN}  ${MAIL_DOMAIN}/${ADMIN_USER}/Maildir/" \
+echo "${ADMIN_LC}@${MAIL_DOMAIN}  ${MAIL_DOMAIN}/${ADMIN_LC}/Maildir/" \
     > "${CONFIG_DIR}/postfix/virtual_mailbox_maps"
 
 if [[ -n "${EXTRA_USERS:-}" ]]; then
     IFS=',' read -ra PAIRS <<< "$EXTRA_USERS"
     for pair in "${PAIRS[@]}"; do
-        uname="${pair%%:*}"
+        uname=$(echo "${pair%%:*}" | tr 'A-Z' 'a-z')
         echo "${uname}@${MAIL_DOMAIN}  ${MAIL_DOMAIN}/${uname}/Maildir/" \
             >> "${CONFIG_DIR}/postfix/virtual_mailbox_maps"
     done
@@ -290,13 +292,13 @@ envsubst '${MAIL_DOMAIN} ${MAIL_HOSTNAME}' \
 # Generate passwd entries
 # openssl passwd -6 produces $6$salt$hash (SHA-512 crypt), Dovecot's {CRYPT} scheme handles this.
 ADMIN_HASH=$(openssl passwd -6 "$ADMIN_PASSWORD")
-echo "${ADMIN_USER}@${MAIL_DOMAIN}:{CRYPT}${ADMIN_HASH}:::::" \
+echo "${ADMIN_LC}@${MAIL_DOMAIN}:{CRYPT}${ADMIN_HASH}:::::" \
     > "${CONFIG_DIR}/dovecot/passwd"
 
 if [[ -n "${EXTRA_USERS:-}" ]]; then
     IFS=',' read -ra PAIRS <<< "$EXTRA_USERS"
     for pair in "${PAIRS[@]}"; do
-        uname="${pair%%:*}"
+        uname=$(echo "${pair%%:*}" | tr 'A-Z' 'a-z')
         upass="${pair#*:}"
         uhash=$(openssl passwd -6 "$upass")
         echo "${uname}@${MAIL_DOMAIN}:{CRYPT}${uhash}:::::" \
