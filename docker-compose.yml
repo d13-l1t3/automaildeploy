@@ -126,6 +126,7 @@ services:
       - ROUNDCUBEMAIL_SKIN=elastic
       - TZ=${TZ}
     volumes:
+      - roundcube-www:/var/www/html
       - ./config/roundcube/config.inc.php:/var/roundcube/config/zcustom.inc.php:ro
       - ./data/roundcube:/var/roundcube/db
     networks:
@@ -146,6 +147,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
+      - roundcube-www:/var/www/html:ro
       - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./config/nginx/mail.conf:/etc/nginx/conf.d/mail.conf:ro
       - ./config/ssl:/etc/ssl/mail:ro
@@ -162,6 +164,8 @@ services:
 # ── Volumes ──────────────────────────────────────────────────────────────────
 volumes:
   mail-vmail:
+    driver: local
+  roundcube-www:
     driver: local
 
 # ── Networks ─────────────────────────────────────────────────────────────────
