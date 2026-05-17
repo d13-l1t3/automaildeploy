@@ -1,23 +1,18 @@
 #!/usr/bin/env bash
 ###############################################################################
-#  AutoMailDeploy — Comprehensive Test Suite
+#  AutoMailDeploy — Comprehensive Test Suite (Proof of Concept)
 #  Run:  sudo bash run_tests.sh
 #
 #  Tests all major components of the mail infrastructure:
-#    1. Container health
-#    2. SSL/TLS endpoints
-#    3. IMAP authentication
-#    4. Anti-relay protection
-#    5. Mail delivery (local)
-#    6. Cross-user delivery
-#    7. Rspamd milter integration
-#    8. GTUBE spam rejection
+#    1. Container health            10. manage_users.sh CRUD
+#    2. SSL/TLS endpoints           11. Nginx reverse proxy
+#    3. IMAP authentication         12. Dovecot Sieve (Junk)
+#    4. Anti-relay protection       13. Postfix SMTP banner
+#    5. Mail delivery (self)        14. MariaDB / Roundcube
+#    6. Cross-user delivery         15. Rate limiting
+#    7. Rspamd milter integration   16. Fail2ban jails
+#    8. GTUBE spam rejection        17. Log rotation & crons
 #    9. DKIM signing
-#   10. manage_users.sh CRUD
-#   11. Nginx reverse proxy
-#   12. Dovecot Sieve (Junk folder)
-#   13. Postfix STARTTLS on submission (587)
-#   14. MariaDB / Roundcube readiness
 ###############################################################################
 set -uo pipefail
 
