@@ -13,4 +13,5 @@ config/roundcube/config.inc.php
 dkim/*.key
 dkim/*.pub
 data/
+backups/
 DNS_RECORDS.txt

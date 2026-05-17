@@ -49,7 +49,7 @@ log "Configuration validated."
 ###############################################################################
 # 1. Install host dependencies
 ###############################################################################
-banner "1/6 — Installing Host Dependencies"
+banner "1/9 — Installing Host Dependencies"
 
 apt-get update -qq
 
@@ -81,13 +81,14 @@ else
     log "Certbot already installed — $(certbot --version 2>&1)"
 fi
 
-# Utilities needed for password hashing and DKIM
-apt-get install -y -qq openssl dnsutils gettext-base
+# Utilities needed for password hashing, DKIM, DNS checks, backups, and security
+apt-get install -y -qq openssl dnsutils gettext-base logrotate rsync ufw fail2ban 2>/dev/null || \
+    apt-get install -y -qq openssl dnsutils gettext-base logrotate rsync 2>/dev/null
 
 ###############################################################################
 # 2. Obtain SSL/TLS Certificates
 ###############################################################################
-banner "2/6 — Obtaining SSL/TLS Certificates"
+banner "2/9 — Obtaining SSL/TLS Certificates"
 
 SSL_DIR="${CONFIG_DIR}/ssl"
 mkdir -p "$SSL_DIR"
@@ -214,7 +215,7 @@ log "SSL/TLS certificates ready."
 ###############################################################################
 # 3. Generate DKIM keys
 ###############################################################################
-banner "3/6 — Generating DKIM Keys"
+banner "3/9 — Generating DKIM Keys"
 
 mkdir -p "$DKIM_DIR"
 DKIM_PRIVATE="${DKIM_DIR}/${MAIL_DOMAIN}.dkim.key"
@@ -236,7 +237,7 @@ DKIM_DNS_VALUE=$(grep -v '^-' "$DKIM_PUBLIC" | tr -d '\n')
 ###############################################################################
 # 4. Generate configuration files from templates
 ###############################################################################
-banner "4/6 — Generating Service Configurations"
+banner "4/9 — Generating Service Configurations"
 
 mkdir -p "${DATA_DIR}"/{postfix/spool,postfix/log,dovecot,redis,mariadb,roundcube,rspamd,nginx/log}
 
@@ -337,7 +338,7 @@ log "Roundcube configs generated."
 ###############################################################################
 # 5. Start Docker infrastructure
 ###############################################################################
-banner "5/6 — Starting Docker Infrastructure"
+banner "5/9 — Starting Docker Infrastructure"
 
 cd "$SCRIPT_DIR"
 
@@ -375,9 +376,111 @@ for svc in automail-postfix automail-dovecot automail-rspamd automail-nginx auto
 done
 
 ###############################################################################
-# 6. Print DNS Records
+# 6. Firewall (UFW)
 ###############################################################################
-banner "6/6 — Required DNS Records"
+banner "6/9 — Configuring Firewall"
+
+if command -v ufw &>/dev/null; then
+    ufw default deny incoming  2>/dev/null || true
+    ufw default allow outgoing 2>/dev/null || true
+    for rule in "22/tcp:SSH" "25/tcp:SMTP" "80/tcp:HTTP" "443/tcp:HTTPS" \
+                "465/tcp:SMTPS" "587/tcp:Submission" "993/tcp:IMAPS" "4190/tcp:Sieve"; do
+        port="${rule%%:*}"; label="${rule#*:}"
+        ufw allow "$port" comment "$label" 2>/dev/null || true
+    done
+    echo "y" | ufw enable 2>/dev/null || true
+    log "UFW firewall configured and enabled."
+else
+    warn "UFW not available — skipping firewall setup."
+fi
+
+###############################################################################
+# 7. Fail2ban & Log Rotation
+###############################################################################
+banner "7/9 — Security & Log Management"
+
+MAIL_LOG_PATH="${DATA_DIR}/postfix/log/mail.log"
+touch "$MAIL_LOG_PATH" 2>/dev/null || true
+
+if command -v fail2ban-client &>/dev/null; then
+    cat > /etc/fail2ban/jail.d/automaildeploy.conf <<F2BEOF
+[DEFAULT]
+automail_logpath = ${MAIL_LOG_PATH}
+
+[postfix-sasl]
+enabled  = true
+port     = smtp,465,submission
+filter   = postfix[mode=auth]
+logpath  = %(automail_logpath)s
+maxretry = 5
+findtime = 600
+bantime  = 3600
+
+[dovecot]
+enabled  = true
+port     = imap,imaps
+filter   = dovecot[mode=aggressive]
+logpath  = %(automail_logpath)s
+maxretry = 5
+findtime = 600
+bantime  = 3600
+F2BEOF
+    systemctl enable fail2ban 2>/dev/null || true
+    systemctl restart fail2ban 2>/dev/null || true
+    log "Fail2ban configured — bans IP after 5 failed auth attempts (1h ban)."
+else
+    warn "Fail2ban not available — skipping."
+fi
+
+cat > /etc/logrotate.d/automaildeploy <<LOGEOF
+${DATA_DIR}/postfix/log/mail.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+LOGEOF
+log "Log rotation configured — 30 days retention, daily rotation."
+
+###############################################################################
+# 8. Automated Tasks (Cron)
+###############################################################################
+banner "8/9 — Setting Up Automated Tasks"
+
+chmod +x "${SCRIPT_DIR}/backup.sh" "${SCRIPT_DIR}/monitor.sh" \
+         "${SCRIPT_DIR}/verify_dns.sh" 2>/dev/null || true
+
+CRON_DIR="/etc/cron.d"
+
+cat > "${CRON_DIR}/automaildeploy-backup" <<CRONEOF
+0 2 * * * root cd ${SCRIPT_DIR} && bash backup.sh >> ${DATA_DIR}/backup.log 2>&1
+CRONEOF
+chmod 644 "${CRON_DIR}/automaildeploy-backup"
+log "Daily backup cron installed (2:00 AM)."
+
+cat > "${CRON_DIR}/automaildeploy-monitor" <<CRONEOF
+*/5 * * * * root cd ${SCRIPT_DIR} && bash monitor.sh --quiet >> ${DATA_DIR}/monitor.log 2>&1
+CRONEOF
+chmod 644 "${CRON_DIR}/automaildeploy-monitor"
+log "Health monitor cron installed (every 5 min)."
+
+if [[ "$USE_SELFSIGNED" == "false" ]]; then
+    cat > "${CRON_DIR}/automaildeploy-certrenew" <<CRONEOF
+0 3,15 * * * root certbot renew --quiet --deploy-hook "cd ${SCRIPT_DIR} && docker compose restart nginx dovecot postfix"
+CRONEOF
+    chmod 644 "${CRON_DIR}/automaildeploy-certrenew"
+    log "Certificate renewal cron installed (3:00 AM & 3:00 PM)."
+else
+    log "Self-signed certificate — no renewal cron needed."
+fi
+
+###############################################################################
+# 9. Print DNS Records
+###############################################################################
+banner "9/9 — Required DNS Records"
 
 echo -e "${BOLD}Add the following DNS records at your DNS provider:${NC}\n"
 
@@ -397,7 +500,6 @@ echo -e "\"v=DKIM1; k=rsa; p=${DKIM_DNS_VALUE}\"\n"
 echo -e "${BOLD}PTR (Reverse DNS):${NC}"
 echo -e "Ask your hosting provider to set the PTR record for ${SERVER_IP} → ${MAIL_HOSTNAME}\n"
 
-# Save DNS info to file for reference
 cat > "${SCRIPT_DIR}/DNS_RECORDS.txt" <<DNSEOF
 # AutoMailDeploy — DNS Records for ${MAIL_DOMAIN}
 # Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -421,6 +523,7 @@ PTR (Reverse DNS):
   ${SERVER_IP}  →  ${MAIL_HOSTNAME}
 DNSEOF
 log "DNS records also saved to ${SCRIPT_DIR}/DNS_RECORDS.txt"
+log "Run ${BOLD}./verify_dns.sh${NC} after adding records to verify them."
 
 banner "Installation Complete!"
 echo -e "${GREEN}Webmail:${NC}   https://${MAIL_HOSTNAME}"
@@ -428,4 +531,19 @@ echo -e "${GREEN}Rspamd:${NC}   https://${MAIL_HOSTNAME}/rspamd/"
 echo -e "${GREEN}IMAP:${NC}     ${MAIL_HOSTNAME}:993 (SSL)"
 echo -e "${GREEN}SMTP:${NC}     ${MAIL_HOSTNAME}:587 (STARTTLS)"
 echo -e "${GREEN}Admin:${NC}    ${ADMIN_USER}@${MAIL_DOMAIN}\n"
-echo -e "Use ${BOLD}./manage_users.sh${NC} to add/remove mailboxes.\n"
+
+echo -e "${BOLD}Management tools:${NC}"
+echo -e "  ${CYAN}./manage_users.sh${NC}  — Add/remove mailboxes"
+echo -e "  ${CYAN}./backup.sh${NC}        — Run a manual backup"
+echo -e "  ${CYAN}./monitor.sh${NC}       — Check system health"
+echo -e "  ${CYAN}./verify_dns.sh${NC}    — Verify DNS records"
+echo -e "  ${CYAN}./run_tests.sh${NC}     — Run the full test suite\n"
+
+echo -e "${BOLD}Automated tasks:${NC}"
+echo -e "  ${GREEN}●${NC} Backups      — daily at 2:00 AM (./backups/)"
+echo -e "  ${GREEN}●${NC} Monitoring   — every 5 minutes (email alerts)"
+echo -e "  ${GREEN}●${NC} Log rotation — daily, 30 days retention"
+echo -e "  ${GREEN}●${NC} Fail2ban     — bans after 5 failed auth attempts"
+[[ "${USE_SELFSIGNED:-false}" == "false" ]] && \
+    echo -e "  ${GREEN}●${NC} Cert renewal — twice daily via certbot"
+echo ""

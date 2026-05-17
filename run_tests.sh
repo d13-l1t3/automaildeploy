@@ -46,7 +46,7 @@ DC="docker compose"
 ###############################################################################
 # 1. Container Health
 ###############################################################################
-banner "1/14 — Container Health"
+banner "1/17 — Container Health"
 
 EXPECTED_CONTAINERS=(automail-postfix automail-dovecot automail-rspamd automail-nginx automail-roundcube automail-mariadb automail-redis)
 for cname in "${EXPECTED_CONTAINERS[@]}"; do
@@ -61,7 +61,7 @@ done
 ###############################################################################
 # 2. SSL/TLS Endpoints
 ###############################################################################
-banner "2/14 — SSL/TLS Endpoints"
+banner "2/17 — SSL/TLS Endpoints"
 
 # IMAPS (993) — send LOGOUT so the server has time to respond
 if echo "a1 LOGOUT" | timeout 5 openssl s_client -connect localhost:993 -quiet 2>/dev/null | grep -qi "OK\|BYE\|Dovecot\|CAPABILITY"; then
@@ -87,7 +87,7 @@ fi
 ###############################################################################
 # 3. IMAP Authentication
 ###############################################################################
-banner "3/14 — IMAP Authentication"
+banner "3/17 — IMAP Authentication"
 
 # Correct credentials
 IMAP_RESULT=$(echo -e "a1 LOGIN ${ADMIN_USER}@${MAIL_DOMAIN} \"${ADMIN_PASSWORD}\"\na2 LOGOUT" \
@@ -110,7 +110,7 @@ fi
 ###############################################################################
 # 4. Anti-Relay Protection
 ###############################################################################
-banner "4/14 — Anti-Relay Protection"
+banner "4/17 — Anti-Relay Protection"
 
 # Method 1: Try SMTP conversation via nc (netcat-openbsd installed in image)
 RELAY_RESULT=$( $DC exec -T postfix bash -c '
@@ -137,7 +137,7 @@ fi
 ###############################################################################
 # 5. Mail Delivery (admin → admin)
 ###############################################################################
-banner "5/14 — Mail Delivery (admin → admin)"
+banner "5/17 — Mail Delivery (admin → admin)"
 
 $DC exec -T postfix bash -c \
     "printf 'Subject: Test 5 self-delivery\nFrom: ${ADMIN_USER}@${MAIL_DOMAIN}\nTo: ${ADMIN_USER}@${MAIL_DOMAIN}\n\nSelf-delivery test at $(date -u +%H:%M:%S)\n' | sendmail -t" 2>/dev/null
@@ -164,7 +164,7 @@ fi
 ###############################################################################
 # 6. Cross-User Delivery
 ###############################################################################
-banner "6/14 — Cross-User Delivery"
+banner "6/17 — Cross-User Delivery"
 
 # Get first extra user (if defined)
 if [[ -n "${EXTRA_USERS:-}" ]]; then
@@ -196,7 +196,7 @@ fi
 ###############################################################################
 # 7. Rspamd Milter Integration
 ###############################################################################
-banner "7/14 — Rspamd Milter Integration"
+banner "7/17 — Rspamd Milter Integration"
 
 # Check postfix log for milter warnings
 MILTER_ERRORS=$($DC exec postfix cat /var/log/mail.log 2>/dev/null | grep -c "rspamd.*not found\|Cannot assign requested address" || true)
@@ -230,7 +230,7 @@ fi
 ###############################################################################
 # 8. GTUBE Spam Rejection
 ###############################################################################
-banner "8/14 — GTUBE Spam Rejection"
+banner "8/17 — GTUBE Spam Rejection"
 
 $DC exec postfix bash -c \
     "printf 'Subject: GTUBE Test\nFrom: ${ADMIN_USER}@${MAIL_DOMAIN}\nTo: ${ADMIN_USER}@${MAIL_DOMAIN}\n\nXJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X\n' | sendmail -t" 2>/dev/null
@@ -255,7 +255,7 @@ fi
 ###############################################################################
 # 9. DKIM Signing
 ###############################################################################
-banner "9/14 — DKIM Signing"
+banner "9/17 — DKIM Signing"
 
 # Check DKIM key exists
 if [[ -f "${SCRIPT_DIR}/dkim/${MAIL_DOMAIN}.dkim.key" ]]; then
@@ -282,7 +282,7 @@ fi
 ###############################################################################
 # 10. manage_users.sh CRUD
 ###############################################################################
-banner "10/14 — manage_users.sh User Management"
+banner "10/17 — manage_users.sh User Management"
 
 # List
 LIST_OUT=$(bash "${SCRIPT_DIR}/manage_users.sh" list 2>&1)
@@ -326,7 +326,7 @@ fi
 ###############################################################################
 # 11. Nginx Reverse Proxy
 ###############################################################################
-banner "11/14 — Nginx Reverse Proxy"
+banner "11/17 — Nginx Reverse Proxy"
 
 # HTTP → HTTPS redirect
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost/ 2>/dev/null)
@@ -359,7 +359,7 @@ fi
 ###############################################################################
 # 12. Dovecot Sieve (default sieve exists)
 ###############################################################################
-banner "12/14 — Dovecot Sieve Configuration"
+banner "12/17 — Dovecot Sieve Configuration"
 
 SIEVE_EXISTS=$($DC exec dovecot test -f /var/vmail/sieve/default.sieve 2>/dev/null && echo "yes" || echo "no")
 if [[ "$SIEVE_EXISTS" == "yes" ]]; then
@@ -371,7 +371,7 @@ fi
 ###############################################################################
 # 13. Postfix SMTP Banner & STARTTLS
 ###############################################################################
-banner "13/14 — Postfix SMTP Banner"
+banner "13/17 — Postfix SMTP Banner"
 
 SMTP_BANNER=$( (echo -e "QUIT\r"; sleep 1) | timeout 3 nc localhost 25 2>&1 || true)
 if echo "$SMTP_BANNER" | grep -q "220.*${MAIL_HOSTNAME}"; then
@@ -395,7 +395,7 @@ fi
 ###############################################################################
 # 14. MariaDB / Roundcube Database
 ###############################################################################
-banner "14/14 — MariaDB & Roundcube Database"
+banner "14/17 — MariaDB & Roundcube Database"
 
 # MariaDB 11+ uses 'mariadb' client; try it first, fall back to 'mysql'
 DB_CHECK=$($DC exec -T mariadb mariadb -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1;" "${MYSQL_DATABASE}" 2>&1 || \
@@ -417,6 +417,75 @@ if [[ -n "$TABLE_COUNT" && "$TABLE_COUNT" -gt 0 ]] 2>/dev/null; then
     pass "Roundcube database has ${TABLE_COUNT} table(s)"
 else
     warn "Roundcube database has no tables yet (created on first webmail login)"
+fi
+
+###############################################################################
+# 15. Rate Limiting
+###############################################################################
+banner "15/17 — SMTP Rate Limiting"
+
+RATE_CFG=$($DC exec -T postfix postconf smtpd_client_message_rate_limit 2>/dev/null | tr -d '[:space:]' || true)
+if echo "$RATE_CFG" | grep -q "=50"; then
+    pass "Rate limiting configured: 50 messages/client/minute"
+else
+    warn "Rate limiting may not be configured (got: ${RATE_CFG:-empty})"
+fi
+
+CONN_CFG=$($DC exec -T postfix postconf smtpd_client_connection_rate_limit 2>/dev/null | tr -d '[:space:]' || true)
+if echo "$CONN_CFG" | grep -q "=30"; then
+    pass "Connection rate limiting configured: 30 connections/client/minute"
+else
+    warn "Connection rate limiting may not be configured"
+fi
+
+###############################################################################
+# 16. Fail2ban
+###############################################################################
+banner "16/17 — Fail2ban Intrusion Protection"
+
+if command -v fail2ban-client &>/dev/null; then
+    if systemctl is-active --quiet fail2ban 2>/dev/null; then
+        pass "Fail2ban service is running"
+    else
+        warn "Fail2ban installed but not running"
+    fi
+
+    if fail2ban-client status postfix-sasl &>/dev/null; then
+        pass "Fail2ban jail active: postfix-sasl"
+    else
+        warn "Fail2ban jail postfix-sasl not found"
+    fi
+
+    if fail2ban-client status dovecot &>/dev/null; then
+        pass "Fail2ban jail active: dovecot"
+    else
+        warn "Fail2ban jail dovecot not found"
+    fi
+else
+    warn "Fail2ban not installed — skipping"
+fi
+
+###############################################################################
+# 17. Log Rotation
+###############################################################################
+banner "17/17 — Log Rotation"
+
+if [[ -f /etc/logrotate.d/automaildeploy ]]; then
+    pass "Logrotate config installed at /etc/logrotate.d/automaildeploy"
+else
+    warn "Logrotate config not found — install.sh may not have been run"
+fi
+
+if [[ -f /etc/cron.d/automaildeploy-backup ]]; then
+    pass "Backup cron job installed (daily at 2:00 AM)"
+else
+    warn "Backup cron job not found"
+fi
+
+if [[ -f /etc/cron.d/automaildeploy-monitor ]]; then
+    pass "Monitor cron job installed (every 5 min)"
+else
+    warn "Monitor cron job not found"
 fi
 
 ###############################################################################

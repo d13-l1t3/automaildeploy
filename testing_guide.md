@@ -62,12 +62,15 @@ sudo bash install.sh
 ```
 
 The installer will:
-1. Install Docker and Certbot (if missing)
+1. Install Docker, Certbot, Fail2ban, UFW, and utilities
 2. Generate or obtain TLS certificates
 3. Generate a 2048-bit DKIM key pair
 4. Render all service configs from templates
 5. Build and start 7 Docker containers
-6. Print the DNS records needed for the domain
+6. Configure UFW firewall (only mail ports + SSH open)
+7. Set up Fail2ban (brute-force protection) and log rotation
+8. Install automated cron jobs (backup, monitoring, cert renewal)
+9. Print the DNS records needed for the domain
 
 After installation completes, wait ~15 seconds for all services to initialize:
 
@@ -79,7 +82,7 @@ sleep 15
 
 ## Part 2: Automated Test Suite
 
-Run the comprehensive 14-point test suite:
+Run the comprehensive 17-point test suite:
 
 ```bash
 sudo bash run_tests.sh
@@ -99,15 +102,18 @@ sudo bash run_tests.sh
 | 8  | GTUBE Spam Rejection | Known spam test pattern is detected and rejected |
 | 9  | DKIM Signing | DKIM key exists, config is correct, key is accessible |
 | 10 | User Management | Add, list, and remove mailbox via `manage_users.sh` |
-| 11 | Nginx Proxy | HTTP→HTTPS redirect, Roundcube & Rspamd UI accessible |
+| 11 | Nginx Proxy | HTTP->HTTPS redirect, Roundcube & Rspamd UI accessible |
 | 12 | Dovecot Sieve | Default spam-to-Junk filter script is deployed |
 | 13 | SMTP Banner | Correct hostname shown, software version hidden |
 | 14 | MariaDB & Roundcube | Database connection works, Roundcube tables exist |
+| 15 | Rate Limiting | SMTP rate limiting parameters configured |
+| 16 | Fail2ban | Service running, postfix-sasl and dovecot jails active |
+| 17 | Log Rotation | Logrotate config, backup cron, and monitor cron installed |
 
 ### Expected Output
 
 ```
-  Passed:  35
+  Passed:  42+
   Failed:  0
   Warnings: 0
 
@@ -326,6 +332,60 @@ sudo docker compose exec mariadb mariadb -uroundcube -pTestRcubeDB123! roundcube
 
 Expected: 17 Roundcube tables (users, contacts, cache, identities, etc.)
 
+### Demo 13 — Backup System
+
+```bash
+# Run a manual backup
+sudo ./backup.sh
+
+# Check the backup was created
+ls -lh backups/
+
+# For remote backups (rsync to another server):
+sudo ./backup.sh --remote user@backup-server:/backups/
+```
+
+Expected: timestamped `.tar.gz` archive containing MariaDB dump, Maildir data, DKIM keys, and configs.
+
+### Demo 14 — Health Monitoring
+
+```bash
+# Run health monitor interactively
+sudo ./monitor.sh
+```
+
+Expected output shows checks for:
+- All 7 containers running
+- Disk usage (alerts at 85%+)
+- TLS certificate expiry (alerts at <14 days)
+- Mail queue size (alerts at 50+)
+- Recent log errors
+- Service port connectivity
+
+If any issues are detected, an alert email is automatically sent to the admin.
+
+### Demo 15 — DNS Verification
+
+```bash
+# Verify all DNS records are correctly configured
+./verify_dns.sh
+```
+
+Expected: checks A, MX, SPF, DKIM, DMARC, and PTR records with pass/fail for each.
+
+### Demo 16 — Fail2ban Intrusion Protection
+
+```bash
+# Check fail2ban is running
+sudo fail2ban-client status
+
+# Check specific jails
+sudo fail2ban-client status postfix-sasl
+sudo fail2ban-client status dovecot
+```
+
+Expected: both jails active, tracking the mail log for failed auth attempts.
+
 ---
 
 ## Part 4: Architecture Summary
@@ -355,7 +415,7 @@ Expected: 17 Roundcube tables (users, contacts, cache, identities, etc.)
 ### Mail Flow
 
 1. **Inbound:** Client → Postfix (port 25/465/587) → Rspamd milter scan → Dovecot LMTP → Maildir
-2. **Spam:** Rspamd score ≥ 15 → rejected at SMTP level; score ≥ 6 → delivered with `X-Spam: Yes` → Sieve files to Junk
+2. **Spam:** Rspamd score >= 15 → rejected at SMTP level; score >= 6 → delivered with `X-Spam: Yes` → Sieve files to Junk
 3. **Webmail:** Browser → Nginx (HTTPS) → Roundcube (PHP-FPM) → Dovecot (IMAP) + Postfix (SMTP)
 4. **Outbound:** Roundcube → Postfix (submission/587) → Rspamd (DKIM signing) → Internet
 
@@ -366,8 +426,15 @@ Expected: 17 Roundcube tables (users, contacts, cache, identities, etc.)
 | TLS | TLSv1.2+ only on all services, strong ciphers |
 | SASL | SMTP submission/smtps require authentication |
 | Anti-relay | `reject_unauth_destination` blocks open relay |
+| Rate Limiting | 50 msgs/min, 30 connections/min per client |
+| Fail2ban | Bans IPs after 5 failed auth attempts (1h ban) |
 | SPF/DKIM/DMARC | DNS records generated, DKIM signing active |
 | Rspamd | Bayes classifier, greylisting, phishing detection |
 | Sieve | Spam auto-filed to Junk folder |
+| Firewall | UFW: only SSH + mail ports open |
 | Nginx | HSTS, X-Frame-Options, HTTPS-only |
 | Network | All containers on isolated Docker bridge |
+| Backups | Daily automated, configurable remote sync |
+| Monitoring | Health checks every 5 min, email alerts |
+| Log Rotation | 30-day retention, compressed daily |
+
