@@ -35,8 +35,10 @@ usage() {
 reload_services() {
     log "Reloading Postfix and Dovecot …"
     cd "$SCRIPT_DIR"
-    # Copy updated passwd into Dovecot container and reload
+    # Copy updated passwd into Dovecot container and fix permissions.
+    # Dovecot auth-worker runs as user 'dovecot', so the file MUST be readable.
     docker compose cp "${PASSWD_FILE}" dovecot:/etc/dovecot/passwd 2>/dev/null || true
+    docker compose exec dovecot chmod 644 /etc/dovecot/passwd 2>/dev/null || true
     docker compose exec dovecot doveadm reload 2>/dev/null || true
     # Copy updated virtual maps into Postfix container, THEN postmap the new data
     docker compose cp "${VMAP_FILE}" postfix:/etc/postfix/virtual_mailbox_maps 2>/dev/null || true
@@ -59,7 +61,7 @@ cmd_add() {
     hash=$(openssl passwd -6 "$pass")
     echo "${email}:{CRYPT}${hash}:::::" >> "$PASSWD_FILE"
     echo "${email}  ${DOMAIN}/${user}/Maildir/" >> "$VMAP_FILE"
-    chmod 600 "$PASSWD_FILE"
+    chmod 644 "$PASSWD_FILE"
     log "Mailbox ${email} created."
     reload_services
 }
@@ -90,7 +92,7 @@ cmd_passwd() {
     local hash
     hash=$(openssl passwd -6 "$pass")
     sed -i "s|^${email}:.*|${email}:{CRYPT}${hash}:::::|" "$PASSWD_FILE"
-    chmod 600 "$PASSWD_FILE"
+    chmod 644 "$PASSWD_FILE"
     log "Password changed for ${email}."
     reload_services
 }

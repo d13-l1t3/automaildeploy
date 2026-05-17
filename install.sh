@@ -306,7 +306,7 @@ if [[ -n "${EXTRA_USERS:-}" ]]; then
             >> "${CONFIG_DIR}/dovecot/passwd"
     done
 fi
-chmod 600 "${CONFIG_DIR}/dovecot/passwd"
+chmod 644 "${CONFIG_DIR}/dovecot/passwd"
 log "Dovecot configs generated."
 
 # ── Rspamd ───────────────────────────────────────────────────────────────────
